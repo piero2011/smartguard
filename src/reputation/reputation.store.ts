@@ -108,6 +108,8 @@ export interface EventQuery {
   from?: number;
   to?: number;
   ip?: string;
+  /** sitio (host exacto de la petición) */
+  host?: string;
   kind?: EventKind;
   text?: string;
 }
@@ -116,13 +118,14 @@ export function eventMatches(e: SecurityEvent, q: EventQuery): boolean {
   if (q.from !== undefined && e.timestamp < q.from) return false;
   if (q.to !== undefined && e.timestamp > q.to) return false;
   if (q.ip && e.ip !== q.ip && e.ipKey !== q.ip) return false;
+  if (q.host && e.host !== q.host) return false;
   if (q.kind && !KIND_MATCH[q.kind](e)) return false;
   if (!q.text) return true;
   return [e.ip, e.ipKey, e.uri, e.reason, e.host, e.category, e.userAgent].some((v) => String(v ?? '').toLowerCase().includes(q.text!));
 }
 
 export function eventQueryIsEmpty(q: EventQuery): boolean {
-  return q.from === undefined && q.to === undefined && !q.ip && !q.text && (!q.kind || q.kind === 'all');
+  return q.from === undefined && q.to === undefined && !q.ip && !q.host && !q.text && (!q.kind || q.kind === 'all');
 }
 
 /** Una página de eventos. `next` es el cursor para pedir la siguiente (null = no hay más). */
@@ -198,7 +201,8 @@ export interface ReputationStore {
   flushStats(minute: number, fields: Record<string, number>, ips: string[], top: TopIncrements): Promise<void>;
   readStats(minutes: number[]): Promise<StatsBucket[]>;
   readActiveIps(minutes: number[]): Promise<number>;
-  readTop(kind: 'paths' | 'ips' | 'rules', hours: number[], limit: number): Promise<{ member: string; score: number }[]>;
+  /** `host`: solo lo de ese sitio; sin él, la suma de todos. */
+  readTop(kind: 'paths' | 'ips' | 'rules', hours: number[], limit: number, host?: string): Promise<{ member: string; score: number }[]>;
 
   getCfRule(ipKey: string): Promise<{ ruleId: string; expiresAt: number } | null>;
   setCfRule(ipKey: string, ruleId: string, expiresAt: number): Promise<void>;
@@ -209,12 +213,20 @@ export interface ReputationStore {
   once(key: string, ttlSec: number): Promise<boolean>;
 }
 
-export interface TopIncrements {
-  hour: number;
+export interface TopMaps {
   paths: Map<string, number>;
   ips: Map<string, number>;
   rules: Map<string, number>;
 }
+
+export interface TopIncrements extends TopMaps {
+  hour: number;
+  /** los mismos "top", separados por sitio (host de la petición) */
+  hosts?: Map<string, TopMaps>;
+}
+
+/** Prefijo de los contadores por sitio dentro del hash de cada minuto: "h:<host>:<campo>". */
+export const HOST_FIELD_PREFIX = 'h:';
 
 /**
  * Duración máxima de un ban (10 años). Es lo que el panel envía para un bloqueo manual

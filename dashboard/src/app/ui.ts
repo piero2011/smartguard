@@ -34,6 +34,10 @@ export type EventFilter = 'all' | 'log' | 'suspicious' | 'wouldBlock' | 'blocked
 @Injectable({ providedIn: 'root' })
 export class Ui {
   readonly tab = signal<Tab>('manage');
+  /** Sitio elegido en la cabecera para Resumen y Eventos ('' = todos los protegidos) */
+  readonly site = signal('');
+  /** Sitios que ofrece el selector: los protegidos según Nginx más los que tienen datos */
+  readonly siteOptions = signal<string[]>([]);
   /** Ventana de tiempo del Resumen, en minutos */
   readonly overviewMinutes = signal(60);
   /** Tema del panel: el del sistema por defecto; si se fija uno, se recuerda en este navegador */
@@ -59,6 +63,11 @@ export class Ui {
       if (this.theme() === 'auto') delete document.documentElement.dataset['theme'];
       else document.documentElement.dataset['theme'] = this.theme();
     });
+  }
+
+  addSites(hosts: string[]): void {
+    const all = new Set([...this.siteOptions(), ...hosts]);
+    if (all.size !== this.siteOptions().length) this.siteOptions.set([...all].sort());
   }
 
   /** Alterna automático → claro → oscuro. */

@@ -296,11 +296,13 @@ export class MemoryReputationStore implements ReputationStore {
     const cur = this.stats.get(String(minute)) ?? {};
     for (const [k, v] of Object.entries(fields)) cur[k] = (cur[k] ?? 0) + v;
     this.stats.set(String(minute), cur, 2 * DAY);
-    for (const kind of ['paths', 'ips', 'rules'] as const) {
-      const key = `${kind}:${top.hour}`;
-      const m = this.tops.get(key) ?? new Map<string, number>();
-      for (const [k, v] of top[kind]) m.set(k, (m.get(k) ?? 0) + v);
-      this.tops.set(key, m, 2 * DAY);
+    for (const [scope, maps] of [['', top] as const, ...[...(top.hosts ?? [])].map(([h, m]) => [`:h:${h}`, m] as const)]) {
+      for (const kind of ['paths', 'ips', 'rules'] as const) {
+        const key = `${kind}:${top.hour}${scope}`;
+        const m = this.tops.get(key) ?? new Map<string, number>();
+        for (const [k, v] of maps[kind]) m.set(k, (m.get(k) ?? 0) + v);
+        this.tops.set(key, m, 2 * DAY);
+      }
     }
   }
   async readStats(minutes: number[]): Promise<StatsBucket[]> {
@@ -309,9 +311,10 @@ export class MemoryReputationStore implements ReputationStore {
   async readActiveIps(): Promise<number> {
     return this.rep.size;
   }
-  async readTop(kind: 'paths' | 'ips' | 'rules', hours: number[], limit: number): Promise<{ member: string; score: number }[]> {
+  async readTop(kind: 'paths' | 'ips' | 'rules', hours: number[], limit: number, host?: string): Promise<{ member: string; score: number }[]> {
     const agg = new Map<string, number>();
-    for (const h of hours) for (const [k, v] of this.tops.get(`${kind}:${h}`) ?? []) agg.set(k, (agg.get(k) ?? 0) + v);
+    const scope = host ? `:h:${host}` : '';
+    for (const h of hours) for (const [k, v] of this.tops.get(`${kind}:${h}${scope}`) ?? []) agg.set(k, (agg.get(k) ?? 0) + v);
     return [...agg.entries()]
       .map(([member, score]) => ({ member, score }))
       .sort((a, b) => b.score - a.score)

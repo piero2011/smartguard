@@ -53,6 +53,15 @@ import { AllowlistComponent, BansComponent, BlockedBotsComponent, BlockedNetwork
         <button [class.active]="tab() === t" (click)="tab.set(t)">{{ ('tab.' + t) | t }}</button>
       }
       @if (lastUpdate()) { <span class="muted small-text">{{ 'common.updated' | t: { time: lastUpdate() } }}</span> }
+      <span class="spacer"></span>
+      @if (tab() === 'overview' || tab() === 'events') {
+        <label class="lang">{{ 'site.label' | t }}
+          <select (change)="ui.site.set($any($event.target).value)">
+            <option value="" [selected]="ui.site() === ''">{{ 'site.all' | t }}</option>
+            @for (h of ui.siteOptions(); track h) { <option [value]="h" [selected]="ui.site() === h">{{ h }}</option> }
+          </select>
+        </label>
+      }
     </nav>
     <main>
       @switch (tab()) {
@@ -123,6 +132,8 @@ export class AppComponent implements OnInit, OnDestroy {
       this.mode.set(m.audit ? 'AUDIT' : 'ENFORCE');
       this.connected.set(true);
       this.authError.set('');
+      // sitios protegidos, para el selector de sitio (si no se pueden leer, se usan los que tengan datos)
+      void this.api.sites().then((s) => this.ui.addSites(s.items.filter((i) => i.status !== 'none').flatMap((i) => i.names))).catch(() => undefined);
       this.lastUpdate.set(this.i18n.time(Date.now()));
     } catch (e) {
       const err = e as ApiErr;

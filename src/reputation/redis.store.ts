@@ -395,13 +395,16 @@ export class RedisReputationStore implements ReputationStore {
         for (let i = 0; i < ips.length; i += 500) p.pfadd(hk, ...ips.slice(i, i + 500));
         p.expire(hk, 2 * DAY_SEC);
       }
-      for (const kind of ['paths', 'ips', 'rules'] as const) {
-        const m = top[kind];
-        if (m.size === 0) continue;
-        const zk = this.k(`top:${kind}:${top.hour}`);
-        for (const [member, inc] of m) p.zincrby(zk, inc, member.slice(0, 200));
-        p.zremrangebyrank(zk, 0, -(TOP_KEEP + 1));
-        p.expire(zk, 2 * DAY_SEC);
+      // "top" globales y, con sufijo :h:<host>, los de cada sitio
+      for (const [scope, maps] of [['', top] as const, ...[...(top.hosts ?? [])].map(([h, m]) => [`:h:${h}`, m] as const)]) {
+        for (const kind of ['paths', 'ips', 'rules'] as const) {
+          const m = maps[kind];
+          if (m.size === 0) continue;
+          const zk = this.k(`top:${kind}:${top.hour}${scope}`);
+          for (const [member, inc] of m) p.zincrby(zk, inc, member.slice(0, 200));
+          p.zremrangebyrank(zk, 0, -(TOP_KEEP + 1));
+          p.expire(zk, 2 * DAY_SEC);
+        }
       }
       return p.exec();
     });
@@ -426,10 +429,11 @@ export class RedisReputationStore implements ReputationStore {
     return this.redis.run((c) => c.pfcount(...minutes.map((m) => this.k(`hll:ips:${m}`))));
   }
 
-  async readTop(kind: 'paths' | 'ips' | 'rules', hours: number[], limit: number): Promise<{ member: string; score: number }[]> {
+  async readTop(kind: 'paths' | 'ips' | 'rules', hours: number[], limit: number, host?: string): Promise<{ member: string; score: number }[]> {
+    const scope = host ? `:h:${host}` : '';
     const res = await this.redis.run((c) => {
       const p = c.pipeline();
-      for (const h of hours) p.zrevrange(this.k(`top:${kind}:${h}`), 0, limit * 2, 'WITHSCORES');
+      for (const h of hours) p.zrevrange(this.k(`top:${kind}:${h}${scope}`), 0, limit * 2, 'WITHSCORES');
       return p.exec();
     });
     const agg = new Map<string, number>();

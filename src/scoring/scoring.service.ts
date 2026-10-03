@@ -143,7 +143,7 @@ export class ScoringService implements OnModuleInit {
     const reasons = signals.map((s) => `${s.id}+${s.score}`);
 
     if (meta.source === 'decision') {
-      this.stats.incr('requests');
+      this.stats.incr('requests', 1, ctx.rawHost);
       this.stats.seenIp(ctx.ipKey);
     }
 
@@ -155,7 +155,7 @@ export class ScoringService implements OnModuleInit {
       const basis = hostExempt ? 'allowlist:HOST' : allowType === 'VERIFIED_BOT' ? `verified-bot:${verifiedBot}` : `allowlist:${allowType}`;
       const d = this.result('ALLOW', audit, 0, 0, 0, 0, reasons, basis);
       if (signals.length) this.record(built, signals, d, meta);
-      this.count(d, meta);
+      this.count(d, meta, built.ctx.rawHost);
       return d;
     }
 
@@ -164,7 +164,7 @@ export class ScoringService implements OnModuleInit {
     if (manual) {
       const d = this.result('BLOCK', false, 0, 0, 0, 0, [...reasons, manual.id], `manual:${manual.kind}`);
       this.record(built, signals, d, meta);
-      this.count(d, meta);
+      this.count(d, meta, built.ctx.rawHost);
       return d;
     }
 
@@ -253,7 +253,7 @@ export class ScoringService implements OnModuleInit {
 
     const d = this.result(action, audit, score, res.ipScore, res.fpScore, res.strongScore, reasons, basis, expiresAt);
     if (signals.length || action === 'BLOCK' || action === 'RATE_LIMIT') this.record(built, signals, d, meta);
-    this.count(d, meta);
+    this.count(d, meta, built.ctx.rawHost);
     return d;
   }
 
@@ -300,20 +300,20 @@ export class ScoringService implements OnModuleInit {
     return { action, audit, score, ipScore, fpScore, strongScore, reasons, basis, expiresAt };
   }
 
-  private count(d: SecurityDecision, meta: EvalMeta): void {
+  private count(d: SecurityDecision, meta: EvalMeta, host: string): void {
     if (meta.source !== 'decision') return;
     const mode = d.audit ? 'audit' : 'enforce';
     this.metrics.requests.inc({ action: d.action, mode });
-    this.stats.incr(`action_${d.action.toLowerCase()}`);
+    this.stats.incr(`action_${d.action.toLowerCase()}`, 1, host);
     if (d.audit && (d.action === 'BLOCK' || d.action === 'RATE_LIMIT')) {
       this.metrics.wouldBlock.inc({ action: d.action });
-      this.stats.incr(`would_${d.action.toLowerCase()}`);
+      this.stats.incr(`would_${d.action.toLowerCase()}`, 1, host);
     } else if (!d.audit && d.action === 'BLOCK') {
       this.metrics.blocked.inc({ basis: d.basis.split(':')[0]! });
-      this.stats.incr('blocked_403');
+      this.stats.incr('blocked_403', 1, host);
     } else if (!d.audit && d.action === 'RATE_LIMIT') {
       this.metrics.rateLimited.inc();
-      this.stats.incr('limited_429');
+      this.stats.incr('limited_429', 1, host);
     }
   }
 
@@ -327,7 +327,9 @@ export class ScoringService implements OnModuleInit {
       requestId: ctx.requestId,
       ip: ctx.ip,
       ipKey: ctx.ipKey,
-      host: ctx.host,
+      // un sitio protegido que no está en sites.yaml llega como "_unknown": en el evento se
+      // guarda su dominio real (solo si es un sitio protegido conocido) para poder filtrar por él
+      host: ctx.host === '_unknown' ? (this.stats.siteName(ctx.rawHost) ?? ctx.host) : ctx.host,
       method: ctx.method,
       uri: ctx.path.slice(0, 300) + (usedQuery && ctx.query ? `?${redactQuery(ctx.query)}` : ''),
       status: meta.status,
@@ -342,7 +344,7 @@ export class ScoringService implements OnModuleInit {
     };
     this.stats.event(e);
     for (const s of signals) this.metrics.scores.inc({ category: s.category, source: meta.source }, s.score);
-    if (delta > 0) this.stats.attack(ctx.ipKey, ctx.path.slice(0, 200), signals.map((s) => s.id), delta);
+    if (delta > 0) this.stats.attack(ctx.ipKey, ctx.path.slice(0, 200), signals.map((s) => s.id), delta, ctx.rawHost);
 
     const level = d.action === 'BLOCK' ? 'warn' : 'info';
     logger.event(level, 'Decision', {

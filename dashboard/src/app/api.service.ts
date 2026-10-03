@@ -75,6 +75,8 @@ export interface Stats {
   bansActive: number;
   wouldBansActive: number;
   totals: Record<string, number>;
+  /** sitios con datos en el periodo */
+  hosts: string[];
   /** minutos que agrupa cada punto de `series` */
   stepMinutes: number;
   /** contadores por tramo de tiempo (t = inicio del tramo, en ms), de más antiguo a más reciente */
@@ -262,8 +264,9 @@ export class Api {
   }
 
   // --- Endpoints --------------------------------------------------------------
-  stats(minutes = 60): Promise<Stats> {
-    return this.req('GET', `/admin/stats?minutes=${minutes}`);
+  /** `host`: solo las cifras de ese sitio; vacío = la suma de todos los protegidos. */
+  stats(minutes = 60, host = ''): Promise<Stats> {
+    return this.req('GET', `/admin/stats?minutes=${minutes}${host ? `&host=${encodeURIComponent(host)}` : ''}`);
   }
   mode(): Promise<{ audit: boolean; mode: string }> {
     return this.req('GET', '/admin/mode');
@@ -287,10 +290,11 @@ export class Api {
    * Una página de eventos; el servidor filtra (tipo, texto, fechas en ms) sobre todos los guardados.
    * Puede traer menos de `limit` con `next` no nulo: quedan eventos por revisar a partir de ese cursor.
    */
-  eventsPage(q: { limit: number; cursor?: string; kind?: string; q?: string; from?: number; to?: number }): Promise<{ items: SecurityEvent[]; next: string | null }> {
+  eventsPage(q: { limit: number; cursor?: string; kind?: string; host?: string; q?: string; from?: number; to?: number }): Promise<{ items: SecurityEvent[]; next: string | null }> {
     const p = new URLSearchParams({ limit: String(q.limit) });
     if (q.cursor) p.set('cursor', q.cursor);
     if (q.kind && q.kind !== 'all') p.set('kind', q.kind);
+    if (q.host) p.set('host', q.host);
     if (q.q) p.set('q', q.q);
     if (q.from !== undefined) p.set('from', String(q.from));
     if (q.to !== undefined) p.set('to', String(q.to));

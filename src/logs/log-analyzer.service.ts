@@ -138,10 +138,10 @@ export class LogAnalyzerService implements OnApplicationBootstrap, OnModuleDestr
   processLine(rec: NginxLogLine, now = Date.now()): void {
     const st = typeof rec.st === 'number' ? rec.st : Number(rec.st ?? 0);
     const phpHit = !!rec.php && rec.php !== '-';
-    this.stats.incr('log_lines');
-    if (st === 403 || st === 404 || st === 429 || st === 444) this.stats.incr(`log_${st}`);
+    this.stats.incr('log_lines', 1, rec.h);
+    if (st === 403 || st === 404 || st === 429 || st === 444) this.stats.incr(`log_${st}`, 1, rec.h);
     if (!phpHit && (st === 403 || st === 444 || st === 429 || (st === 404 && !STATIC_EXT.test(rec.p ?? '')))) {
-      this.stats.incr('php_avoided');
+      this.stats.incr('php_avoided', 1, rec.h);
       this.metrics.phpAvoided.inc({ by: rec.sg ? 'smartguard' : st === 429 ? 'limit_req' : 'nginx' });
     }
 

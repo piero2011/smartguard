@@ -5,7 +5,7 @@ import { RulesService } from '../rules/rules.service';
 import { BanService } from '../ban/ban.service';
 import { AllowlistService } from '../whitelist/allowlist.service';
 import { ReputationService } from '../reputation/reputation.service';
-import { MAX_BAN_SEC } from '../reputation/reputation.store';
+import { HOST_FIELD_PREFIX, MAX_BAN_SEC } from '../reputation/reputation.store';
 import { ModeService } from '../scoring/mode.service';
 import { CloudflareRangesService } from '../cloudflare/cloudflare-ranges.service';
 import { ParsedIp, ipKey, parseIp } from '../common/ip.util';
@@ -288,12 +288,27 @@ export class AdminController {
     const [buckets, activeIps, topPaths, topIps, topRules, bansActive, wouldBans] = await Promise.all([
       this.reputation.call((s) => s.readStats(mins)),
       this.reputation.call((s) => s.readActiveIps(mins.slice(-5))),
-      this.reputation.call((s) => s.readTop('paths', hours, 15)),
-      this.reputation.call((s) => s.readTop('ips', hours, 15)),
-      this.reputation.call((s) => s.readTop('rules', hours, 15)),
+      this.reputation.call((s) => s.readTop('paths', hours, 15, q.host)),
+      this.reputation.call((s) => s.readTop('ips', hours, 15, q.host)),
+      this.reputation.call((s) => s.readTop('rules', hours, 15, q.host)),
       this.bans.count(false),
       this.bans.count(true),
     ]);
+    // Cada minuto guarda los contadores globales y, con prefijo "h:<host>:", los de cada sitio.
+    // Aquí se deja en cada tramo solo lo pedido (un sitio o el total) y se anota qué sitios tienen datos.
+    const seen = new Map<string, number>();
+    const own = q.host ? `${HOST_FIELD_PREFIX}${q.host}:` : '';
+    for (const b of buckets) {
+      const kept: Record<string, number> = {};
+      for (const [k, v] of Object.entries(b.fields)) {
+        if (k.startsWith(HOST_FIELD_PREFIX)) {
+          const host = k.slice(HOST_FIELD_PREFIX.length, k.lastIndexOf(':'));
+          seen.set(host, (seen.get(host) ?? 0) + v);
+          if (own && k.startsWith(own)) kept[k.slice(own.length)] = v;
+        } else if (!own) kept[k] = v;
+      }
+      b.fields = kept;
+    }
     const totals: Record<string, number> = {};
     for (const b of buckets) for (const [k, v] of Object.entries(b.fields)) totals[k] = (totals[k] ?? 0) + v;
     // Serie para el gráfico del panel: se agrupa en tramos para que 24 h no sean 1440 puntos.
@@ -311,6 +326,9 @@ export class AdminController {
     return {
       mode: this.mode.audit ? 'AUDIT' : 'ENFORCE',
       windowMinutes: minutes,
+      host: q.host ?? '',
+      /** sitios con datos en el periodo, del que más tiene al que menos */
+      hosts: [...seen.entries()].sort((a, b) => b[1] - a[1]).map(([h]) => h),
       requestsPerMin: perMin('requests'),
       logLinesPerMin: perMin('log_lines'),
       activeIps5m: activeIps,
@@ -351,6 +369,7 @@ export class AdminController {
       from: q.from === undefined ? undefined : Number(q.from),
       to: q.to === undefined ? undefined : Number(q.to),
       kind: q.kind,
+      host: q.host,
       text: q.q?.toLowerCase() || undefined,
     };
     return this.reputation.call((s) => s.pageEvents(q.limit ?? 50, query, q.cursor));

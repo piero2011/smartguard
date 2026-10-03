@@ -6,6 +6,7 @@ import { ConfigService } from '../../src/config/config.service';
 import { configureApp, createAdapter } from '../../src/main';
 import { BlocklistService } from '../../src/blocklist/blocklist.service';
 import { IpInfoService } from '../../src/ipinfo/ipinfo.service';
+import { StatsService } from '../../src/stats/stats.service';
 import { testEnv } from '../helpers';
 
 const SECRET = 'test-decision-secret-0123456789';
@@ -331,5 +332,39 @@ describe('AUDIT_MODE=true (instalación inicial)', () => {
     expect((await decide('198.51.100.91', 'Mozilla/5.0 Test')).statusCode).toBe(403);
     expect((await admin('DELETE', '/admin/ban/198.51.100.91')).statusCode).toBe(200);
     expect((await decide('198.51.100.91', 'Mozilla/5.0 Test')).statusCode).toBe(200);
+  });
+});
+
+describe('Estadísticas por sitio (API)', () => {
+  let app: NestFastifyApplication;
+  beforeAll(async () => {
+    app = await makeApp({ AUDIT_MODE: 'false' });
+  });
+  afterAll(async () => {
+    await app.close();
+  });
+  const decide = (ip: string, uri: string, extra?: Record<string, string>) =>
+    app.inject({ method: 'GET', url: '/internal/decision', headers: decisionHeaders(ip, uri, extra), remoteAddress: '127.0.0.1' });
+
+  it('estadísticas y eventos por sitio: total, un sitio y lista de sitios con datos', async () => {
+    const get = (url: string) => app.inject({ method: 'GET', url, headers: { authorization: `Bearer ${TOKEN}` }, remoteAddress: '127.0.0.1' });
+    await decide('198.51.100.120', '/.env', { 'x-host': 'otra-tienda.test' });
+    await decide('198.51.100.121', '/', { 'x-host': 'otra-tienda.test' });
+    await decide('198.51.100.122', '/');
+    await app.get(StatsService).flush();
+    const all = (await get('/admin/stats?minutes=5')).json();
+    const one = (await get('/admin/stats?minutes=5&host=otra-tienda.test')).json();
+    expect(all.hosts).toEqual(expect.arrayContaining(['otra-tienda.test', 'orleansembroidery.com']));
+    expect(one.host).toBe('otra-tienda.test');
+    expect(one.totals.requests).toBe(2);
+    expect(all.totals.requests).toBeGreaterThan(one.totals.requests);
+    // en la respuesta no quedan campos con el prefijo interno por sitio
+    expect(Object.keys(all.totals).some((k) => k.startsWith('h:'))).toBe(false);
+    expect(one.topPaths.map((p: { member: string }) => p.member)).toEqual(['/.env']);
+    // el evento de un sitio que no está en sites.yaml guarda su dominio real y se puede filtrar por él
+    const events = (await get('/admin/events/page?limit=50&host=otra-tienda.test')).json();
+    expect(events.items.length).toBeGreaterThanOrEqual(1);
+    expect(events.items.every((e: { host: string }) => e.host === 'otra-tienda.test')).toBe(true);
+    expect((await get('/admin/stats?host=No%20Valido')).statusCode).toBe(400);
   });
 });

@@ -22,6 +22,7 @@ const RANGES = [60, 360, 1440] as const;
       }
     </div>
   </div>
+  @if (ui.site()) { <p class="muted sub">{{ 'site.hint' | t: { site: ui.site() } }}</p> }
   @if (stats(); as s) {
     <div [class.stale]="loading()">
     <section class="card">
@@ -32,7 +33,8 @@ const RANGES = [60, 360, 1440] as const;
     </section>
     <div class="cards">
       @for (c of cards(s); track c.key) {
-        <button type="button" class="stat" [title]="'ov.open' | t" (click)="c.open()"><span>{{ c.key | t }}</span><b>{{ c.value }}</b></button>
+        <button type="button" class="stat" [title]="'ov.open' | t" (click)="c.open()">
+          <span>{{ c.key | t }}@if (c.global && ui.site()) { · {{ 'site.allShort' | t }} }</span><b>{{ c.value }}</b></button>
       }
     </div>
     <h2 class="section">{{ 'ov.topTitle' | t }}</h2>
@@ -111,6 +113,7 @@ export class OverviewComponent {
     effect(() => {
       this.ui.changed();
       this.ui.overviewMinutes();
+      this.ui.site();
       untracked(() => void this.load());
     });
   }
@@ -119,7 +122,9 @@ export class OverviewComponent {
     // mientras recarga se mantiene lo anterior atenuado: sin saltos de maquetación
     this.loading.set(true);
     try {
-      this.stats.set(await this.api.stats(this.ui.overviewMinutes()));
+      const s = await this.api.stats(this.ui.overviewMinutes(), this.ui.site());
+      this.stats.set(s);
+      this.ui.addSites(s.hosts ?? []);
     } catch (e) {
       this.ui.notify('error', () => this.api.describe(e as ApiErr));
     } finally {
@@ -146,15 +151,16 @@ export class OverviewComponent {
   }
 
   /** Cada tarjeta abre el detalle de su contador: Eventos (ya filtrados) o Bloqueadas. */
-  cards(s: Stats): { key: string; value: number; open: () => void }[] {
+  /** `global`: la cifra es de todo el servidor aunque haya un sitio elegido (IPs activas, bloqueos). */
+  cards(s: Stats): { key: string; value: number; open: () => void; global?: boolean }[] {
     const t = s.totals ?? {};
     const ev = (f: EventFilter) => () => this.ui.openEvents(f);
     return [
       { key: 'ov.decisions', value: s.requestsPerMin, open: ev('all') },
       { key: 'ov.logLines', value: s.logLinesPerMin, open: ev('log') },
-      { key: 'ov.activeIps', value: s.activeIps5m, open: ev('all') },
-      { key: 'ov.bans', value: s.bansActive, open: () => this.ui.openBans(false) },
-      { key: 'ov.wouldBans', value: s.wouldBansActive, open: () => this.ui.openBans(true) },
+      { key: 'ov.activeIps', value: s.activeIps5m, open: ev('all'), global: true },
+      { key: 'ov.bans', value: s.bansActive, open: () => this.ui.openBans(false), global: true },
+      { key: 'ov.wouldBans', value: s.wouldBansActive, open: () => this.ui.openBans(true), global: true },
       { key: 'ov.suspicious', value: t['action_observe'] ?? 0, open: ev('suspicious') },
       { key: 'ov.sg403', value: t['blocked_403'] ?? 0, open: ev('blocked') },
       { key: 'ov.sg429', value: t['limited_429'] ?? 0, open: ev('limited') },
@@ -636,7 +642,7 @@ export class EventsComponent implements OnDestroy {
     });
     effect(() => {
       this.ui.changed();
-      const key = JSON.stringify([this.ui.eventFilter(), this.query(), this.ui.eventFrom(), this.ui.eventTo()]);
+      const key = JSON.stringify([this.ui.eventFilter(), this.query(), this.ui.eventFrom(), this.ui.eventTo(), this.ui.site()]);
       untracked(() => {
         if (key !== this.filterKey) {
           this.filterKey = key;
@@ -657,7 +663,7 @@ export class EventsComponent implements OnDestroy {
   async load(): Promise<void> {
     const seq = ++this.loadSeq;
     const ms = (v: string) => (v && !Number.isNaN(new Date(v).getTime()) ? new Date(v).getTime() : undefined);
-    const base = { kind: this.ui.eventFilter(), q: this.query(), from: ms(this.ui.eventFrom()), to: ms(this.ui.eventTo()) };
+    const base = { kind: this.ui.eventFilter(), host: this.ui.site(), q: this.query(), from: ms(this.ui.eventFrom()), to: ms(this.ui.eventTo()) };
     this.loading.set(true);
     try {
       const items: SecurityEvent[] = [];

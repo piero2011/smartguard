@@ -92,10 +92,16 @@ export const EventsPageQuery = {
   from: EventsQuery.from,
   to: EventsQuery.to,
   kind: field.optional(field.enum(EVENT_KINDS)),
+  host: field.optional(field.string({ max: 100, pattern: /^[a-z0-9_]([a-z0-9._-]{0,98}[a-z0-9])?$/, message: 'must be a host name' })),
   /** texto libre: IP, ruta, motivo, host, categoría o User-Agent */
   q: field.optional(field.string({ max: 100 })),
 };
 
+/** Host de un sitio protegido (dominio en minúsculas) */
+const hostField = () => field.optional(field.string({ max: 100, pattern: /^[a-z0-9]([a-z0-9.-]{0,98}[a-z0-9])?$/, message: 'must be a host name' }));
+
 export const StatsQuery = {
   minutes: field.optional(field.int({ min: 1, max: 1440 })),
+  /** solo las cifras de este sitio; sin él, la suma de todos */
+  host: hostField(),
 };
