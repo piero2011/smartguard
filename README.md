@@ -463,6 +463,9 @@ sudo /opt/smartguard/scripts/rollback-nginx.sh --disable      # neutraliza Smart
 sudo smartguard nginx-enable                                  # deshace lo anterior
 sudo /opt/smartguard/scripts/rollback-nginx.sh --list
 sudo /opt/smartguard/scripts/rollback-nginx.sh --restore /etc/nginx/backups/nginx-….tar.gz
+sudo smartguard protect tienda.com otra.com                   # añade la protección a esos sitios (edita su vhost, nginx -t, recarga)
+sudo smartguard protect tienda.com --dry-run                  # solo enseña qué líneas añadiría
+sudo smartguard unprotect tienda.com                          # quita los include de SmartGuard de ese sitio
 sudo smartguard update                                        # si hay cambios en GitHub, los descarga e instala
 sudo smartguard update --check                                # solo dice si hay una versión nueva
 cd nueva-version && sudo ./scripts/update.sh                  # lo mismo a mano, desde una copia ya descargada

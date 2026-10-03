@@ -35,6 +35,13 @@ Uso: sudo smartguard <comando> [args]
   nginx-sync                  Regenera allowlist.conf y secret.conf desde el .env y recarga Nginx
   nginx-enable                Reactiva SmartGuard en Nginx tras rollback-nginx.sh --disable
   fw-sync                     Sincroniza sets nftables (trusted, cloudflare)
+  protect <sitio>... [--dry-run] [--yes]
+                              Añade la protección a uno o varios sitios de Nginx: lee su vhost
+                              (/etc/nginx/sites-enabled/<sitio>.conf), inserta los include de
+                              SmartGuard donde corresponde, comprueba con nginx -t y recarga.
+                              Enseña los cambios antes de aplicarlos; si Nginx los rechaza, los deshace.
+  unprotect <sitio>... [--dry-run] [--yes]
+                              Quita los include de SmartGuard de esos sitios
   update [--check] [--force] [--yes]
                               Consulta GitHub y, SOLO si hay cambios, descarga e instala la nueva
                               versión conservando tu configuración. --check: solo avisa.
@@ -250,6 +257,52 @@ JS
     ;;
 
   fw-sync) "$SG_FWSYNC" ;;
+
+  protect|unprotect)
+    dry=false; sites=()
+    for a in "$@"; do
+      case "$a" in
+        --dry-run) dry=true ;;
+        --yes|-y) ASSUME_YES=true ;;
+        -*) die "Uso: smartguard $cmd <sitio>... [--dry-run] [--yes]" ;;
+        *) sites+=("$a") ;;
+      esac
+    done
+    [ ${#sites[@]} -ge 1 ] || die "Uso: smartguard $cmd <sitio>... [--dry-run] [--yes]   (sitio = nombre del vhost, p. ej. tienda.com)"
+    tool=$SG_OPT/dist/nginx/vhost-cli.js
+    [ -f "$tool" ] || die "Falta $tool (actualiza SmartGuard)."
+    files=()
+    for s in "${sites[@]}"; do
+      [[ "$s" =~ ^[A-Za-z0-9._-]+$ ]] || die "Nombre de sitio inválido: $s"
+      f=$NGX_DIR/sites-enabled/${s%.conf}.conf
+      [ -f "$f" ] || die "No existe $f (el nombre es el de la columna «Archivo del vhost» del panel)"
+      files+=("$f")
+    done
+    # 1) Enseñar qué se cambiaría, sin tocar nada
+    rc=0; "$NODE" "$tool" "$cmd" --dry-run "${files[@]}" || rc=$?
+    [ "$rc" -eq 2 ] && { ok "No hay nada que cambiar."; exit 0; }
+    [ "$rc" -eq 0 ] || die "No se pudieron leer los vhosts."
+    [ "$dry" = true ] && exit 0
+    echo
+    if [ "$cmd" = protect ] && [ "$(current_enforce)" = 1 ]; then
+      warn "SmartGuard está en ENFORCE: estos sitios empezarán a bloquear de verdad en cuanto se recargue Nginx."
+    fi
+    confirm "¿Aplicar estos cambios y recargar Nginx?" || die "Cancelado. No se ha cambiado nada."
+    # 2) Copia de los vhosts que se van a tocar (fuera de sites-enabled) + backup completo de /etc/nginx
+    backup_nginx "pre-$cmd"
+    keep=$(mktemp -d)
+    for f in "${files[@]}"; do cp -a "$f" "$keep/"; done
+    # 3) Aplicar; si Nginx rechaza la configuración, se restauran los originales
+    if ! "$NODE" "$tool" "$cmd" "${files[@]}" >/dev/null || ! nginx_safe_reload; then
+      for f in "${files[@]}"; do cp -a "$keep/$(basename "$f")" "$f"; done
+      rm -rf "$keep"
+      nginx -t >/dev/null 2>&1 && systemctl reload nginx
+      die "Nginx rechazó los cambios: se han restaurado los vhosts originales. Nada cambiado."
+    fi
+    rm -rf "$keep"
+    ok "Hecho. Comprueba el estado en el panel (IPs y sitios → Actualizar) y vigila la pestaña Eventos."
+    warn "CloudPanel guarda su propia copia de cada vhost: si editas y guardas el vhost de uno de estos sitios en CloudPanel, estos cambios se pierden y hay que repetir el comando."
+    ;;
 
   version)
     echo "SmartGuard $("$NODE" -p "require('$SG_OPT/package.json').version") ($(installed_commit))"
