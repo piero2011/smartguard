@@ -87,6 +87,57 @@ export interface Stats {
   degraded: boolean;
 }
 
+/** Regla creada desde el panel (lo que se envía y lo que devuelve /admin/panel-rules) */
+export interface PanelRule {
+  id: string;
+  name?: string;
+  enabled?: boolean;
+  target?: 'path' | 'query' | 'uri' | 'ua' | 'method';
+  pattern: string;
+  /** al enviar: métodos separados por comas; al leer: lista */
+  methods?: string | string[];
+  score: number;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  confidence?: 'low' | 'medium' | 'high';
+  category: string;
+  action?: 'score' | 'block' | 'allow';
+}
+
+/**
+ * Cuerpo que acepta POST /admin/panel-rules: solo los campos editables (una regla leída del servidor
+ * trae además flags, phase, ttl… que la API rechazaría) y los métodos como texto separado por comas.
+ */
+export function panelRuleBody(r: PanelRule): Record<string, unknown> {
+  const methods = Array.isArray(r.methods) ? r.methods.filter((m) => m !== 'ANY').join(',') : (r.methods ?? '');
+  return {
+    id: r.id,
+    name: r.name || undefined,
+    enabled: r.enabled,
+    target: r.target ?? 'path',
+    pattern: r.pattern,
+    methods: methods || undefined,
+    score: r.score,
+    severity: r.severity,
+    confidence: r.confidence,
+    category: r.category,
+    action: r.action,
+  };
+}
+
+/** Regla activa (de los archivos o del panel), tal como la usa el motor */
+export interface RuleInfo {
+  id: string;
+  name: string;
+  source: 'panel' | 'file';
+  target: 'path' | 'query' | 'uri' | 'ua' | 'method';
+  pattern: string;
+  score: number;
+  severity: string;
+  confidence: string;
+  category: string;
+  action: 'score' | 'block' | 'allow';
+}
+
 /** Un sitio de Nginx y lo que SmartGuard hace en él, según los include de su vhost */
 export interface NginxSite {
   file: string;
@@ -278,6 +329,22 @@ export class Api {
   }
   bans(audit: boolean, offset = 0, limit = 500): Promise<{ total: number; items: BanRecord[] }> {
     return this.req('GET', `/admin/bans?audit=${audit}&offset=${offset}&limit=${limit}`);
+  }
+  rules(): Promise<{ rules: RuleInfo[] }> {
+    return this.req('GET', '/admin/rules');
+  }
+  panelRules(): Promise<{ items: PanelRule[]; max: number }> {
+    return this.req('GET', '/admin/panel-rules');
+  }
+  savePanelRule(rule: PanelRule): Promise<{ rule: PanelRule }> {
+    return this.req('POST', '/admin/panel-rules', panelRuleBody(rule));
+  }
+  deletePanelRule(id: string): Promise<{ removed: boolean }> {
+    return this.req('DELETE', `/admin/panel-rules?id=${encodeURIComponent(id)}`);
+  }
+  /** POST genérico para la importación de una copia (cada entrada va a su endpoint). */
+  post(path: string, body: unknown): Promise<unknown> {
+    return this.req('POST', path, body);
   }
   sites(): Promise<NginxSites> {
     return this.req('GET', '/admin/sites');

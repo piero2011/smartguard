@@ -208,3 +208,5 @@ nav .picker-btn { border: 1px solid var(--line); border-radius: 6px; padding: 6p
 nav .picker-btn:hover:not(:disabled) { border-color: var(--accent); }
 nav .picker-pop li button { border: none; padding: 6px 8px; color: var(--fg); font-weight: 400; }
 nav .picker-pop li button.active { color: var(--accent); font-weight: 600; }
+/* descripción bajo el identificador de una regla */
+td > code + .ua { display: block; margin-top: 2px; font-size: 11px; color: var(--muted); white-space: normal; }

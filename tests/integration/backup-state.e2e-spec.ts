@@ -13,7 +13,9 @@ import { testEnv } from '../helpers';
 const TOKEN = 'test-admin-token-0123456789abcdef0123456789';
 
 async function makeApp(): Promise<{ app: NestFastifyApplication; url: string }> {
-  const config = new ConfigService(testEnv({ AUDIT_MODE: 'false' }));
+  // cada servidor guarda sus reglas del panel en su propia carpeta de datos
+  const data = await fs.mkdtemp(path.join(os.tmpdir(), 'sg-data-'));
+  const config = new ConfigService(testEnv({ AUDIT_MODE: 'false', ANALYZER_STATE_FILE: path.join(data, 'analyzer.state') }));
   await config.loadFiles();
   const mod = await Test.createTestingModule({ imports: [AppModule.forRoot({ config })] }).compile();
   const app = mod.createNestApplication<NestFastifyApplication>(createAdapter());
@@ -47,6 +49,8 @@ describe('Copia de seguridad de las listas (smartguard backup / restore)', () =>
       networks: [{ asn: 64500, note: 'n' }],
     };
     expect(importPlan(state, now).map((s) => s.label)).toEqual(['lista blanca a.test', 'bot dotbot', 'red AS64500', 'bloqueo 198.51.100.1']);
+    const withRule = { ...state, rules: [{ id: 'mi-regla', pattern: '^/x$', methods: ['POST'], score: 5, severity: 'low', category: 'SCANNER' }] };
+    expect(importPlan(withRule, now)[0]).toMatchObject({ label: 'regla mi-regla', path: '/admin/panel-rules', body: { id: 'mi-regla', methods: 'POST', target: 'path' } });
   });
 
   it('exporta de un servidor e importa en otro: lista blanca, bots y bloqueos manuales', async () => {
@@ -60,6 +64,8 @@ describe('Copia de seguridad de las listas (smartguard backup / restore)', () =>
       expect((await post(a.url, '/admin/allow', { value: '203.0.113.50', type: 'ADMIN_ALLOWLIST', note: 'yo' })).status).toBeLessThan(300);
       expect((await post(a.url, '/admin/blocked-bots', { pattern: 'malbot', note: 'prueba' })).status).toBeLessThan(300);
       expect((await post(a.url, '/admin/ban', { ip: '198.51.100.77', duration: '3650d', reason: 'manual' })).status).toBeLessThan(300);
+      const rule = { id: 'mi-regla-copia', target: 'path', pattern: '^/solo-en-copia/', methods: 'GET,POST', score: 15, severity: 'medium', category: 'SCANNER' };
+      expect((await post(a.url, '/admin/panel-rules', rule)).status).toBeLessThan(300);
 
       const file = path.join(await fs.mkdtemp(path.join(os.tmpdir(), 'sg-state-')), 'state.json');
       process.env['SG_TOKEN'] = TOKEN;
@@ -73,6 +79,8 @@ describe('Copia de seguridad de las listas (smartguard backup / restore)', () =>
       const allow = (await get(b.url, '/admin/allow')) as { dynamic: { value: string; target: string }[] };
       expect(allow.dynamic.map((e) => `${e.target}:${e.value}`).sort()).toEqual(['client:203.0.113.50/32', 'host:api.tienda.test']);
       expect(((await get(b.url, '/admin/blocked-bots')) as { items: { pattern: string }[] }).items.map((x) => x.pattern)).toEqual(['malbot']);
+      const rules = (await get(b.url, '/admin/panel-rules')) as { items: { id: string; methods: string[] }[] };
+      expect(rules.items.map((r) => [r.id, r.methods])).toEqual([['mi-regla-copia', ['GET', 'POST']]]);
       const bans = (await get(b.url, '/admin/bans')) as { items: { ip: string; source: string }[] };
       expect(bans.items.map((x) => x.ip)).toEqual(['198.51.100.77']);
       await fs.rm(path.dirname(file), { recursive: true });

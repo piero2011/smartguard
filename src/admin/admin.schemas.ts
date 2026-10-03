@@ -1,5 +1,6 @@
 import { field } from '../common/validation';
 import { EVENT_KINDS } from '../reputation/reputation.store';
+import { EVENT_CATEGORIES } from '../common/types';
 
 /**
  * Esquemas declarativos de la API admin (se aplican con @ValidBody / @ValidQuery).
@@ -64,6 +65,26 @@ export const IpInfoQuery = {
 export const LookupQuery = {
   /** IP, CIDR, dominio, *.dominio o URL */
   value: field.allowValue(),
+};
+
+/** Regla creada desde el panel (mismos campos que una regla de rules.yaml). */
+export const PanelRuleBody = {
+  id: field.string({ min: 2, max: 64, pattern: /^[a-z0-9][a-z0-9_.-]{1,63}$/, message: 'lowercase letters, digits, "_", "." or "-" (2-64)' }),
+  name: field.optional(field.string({ max: 120 })),
+  enabled: field.optional(field.boolean()),
+  target: field.enum(['path', 'query', 'uri', 'ua', 'method'] as const),
+  pattern: field.string({ min: 1, max: 500 }),
+  /** métodos HTTP separados por comas; vacío = todos */
+  methods: field.optional(field.string({ max: 60, pattern: /^[A-Za-z]{3,7}(,[A-Za-z]{3,7}){0,7}$/, message: 'comma-separated HTTP methods' })),
+  score: field.int({ min: 0, max: 1000 }),
+  severity: field.enum(['low', 'medium', 'high', 'critical'] as const),
+  confidence: field.optional(field.enum(['low', 'medium', 'high'] as const)),
+  category: field.enum(EVENT_CATEGORIES),
+  action: field.optional(field.enum(['score', 'block', 'allow'] as const)),
+};
+
+export const PanelRuleQuery = {
+  id: PanelRuleBody.id,
 };
 
 export const ModeBody = {

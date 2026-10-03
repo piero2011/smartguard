@@ -12,12 +12,39 @@ import { ParsedIp, ipKey, parseIp } from '../common/ip.util';
 import { formatDuration, parseDuration } from '../common/uri.util';
 import { currentMinute } from '../stats/stats.service';
 import { AllowValueParam, Infer, IpParam, ValidBody, ValidQuery } from '../common/validation';
-import { AllowBody, BanBody, BotBody, BotQuery, EventsPageQuery, EventsQuery, IpInfoQuery, ListQuery, LookupQuery, ModeBody, NetworkBody, NetworkQuery, StatsQuery, UnbanQuery } from './admin.schemas';
+import { AllowBody, BanBody, BotBody, BotQuery, EventsPageQuery, EventsQuery, IpInfoQuery, PanelRuleBody, PanelRuleQuery, ListQuery, LookupQuery, ModeBody, NetworkBody, NetworkQuery, StatsQuery, UnbanQuery } from './admin.schemas';
 import { BlocklistService } from '../blocklist/blocklist.service';
 import { IpInfoService } from '../ipinfo/ipinfo.service';
 import { ApiError } from '../common/api-error';
 import { SystemInfoService } from './system-info.service';
 import { NginxSitesService } from './nginx-sites.service';
+import { parseRuleDef } from '../config/config.service';
+import { compileSafeRegex } from '../rules/regex-safety';
+import { RuleDef } from '../rules/rule.types';
+
+const MAX_PANEL_RULES = 200;
+
+/** Peticiones de un visitante normal: una regla del panel que las alcance afectaría a todo el mundo. */
+const NORMAL_SAMPLES: Record<RuleDef['target'] & string, string[]> = {
+  path: ['/', '/index.php', '/wp-login.php', '/wp-admin/admin-ajax.php', '/wp-json/', '/shop/', '/cart/', '/checkout/', '/my-account/'],
+  uri: ['/', '/index.php', '/?wc-ajax=get_refreshed_fragments', '/wp-admin/admin-ajax.php', '/shop/?orderby=price'],
+  query: ['wc-ajax=get_refreshed_fragments', 'orderby=price&paged=2', 's=camiseta'],
+  ua: [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+  ],
+  method: ['GET', 'POST'],
+};
+
+/** Devuelve el ejemplo de tráfico normal que la regla alcanzaría, o null. Las excepciones (allow) no se comprueban. */
+export function tooBroad(def: RuleDef): string | null {
+  if (def.action === 'allow' || def.enabled === false) return null;
+  const regex = new RegExp(def.pattern, def.flags ?? 'i');
+  const methods = def.methods?.length ? new Set(def.methods) : null;
+  // una regla limitada a métodos que un visitante no usa (p. ej. solo PUT) no afecta al tráfico normal
+  if (def.target !== 'method' && methods && !methods.has('GET') && !methods.has('POST') && !methods.has('ANY')) return null;
+  return NORMAL_SAMPLES[def.target ?? 'path'].find((s) => regex.test(s)) ?? null;
+}
 import { logger } from '../common/logger';
 
 /**
@@ -397,11 +424,14 @@ export class AdminController {
 
   @Get('rules')
   rulesList(): unknown {
+    const panelIds = new Set(this.config.panelRules.map((r) => r.id));
     return {
       ...this.rules.info(),
       rules: this.rules.listRules().map((r) => ({
         id: r.id,
         name: r.name,
+        /** panel = creada desde el panel (se puede editar allí) · file = de rules.yaml / rules.d */
+        source: panelIds.has(r.id) ? 'panel' : 'file',
         target: r.target,
         pattern: r.regex.source,
         score: r.score,
@@ -417,10 +447,63 @@ export class AdminController {
     };
   }
 
+  /** Reglas creadas desde el panel (incluidas las desactivadas, que no aparecen en /admin/rules). */
+  @Get('panel-rules')
+  panelRules(): unknown {
+    return { items: this.config.panelRules, max: MAX_PANEL_RULES };
+  }
+
+  /** Crea una regla del panel o reemplaza la que tenga ese id. Se valida y compila antes de guardarla. */
+  @Post('panel-rules')
+  @HttpCode(200)
+  async savePanelRule(@ValidBody(PanelRuleBody) dto: Infer<typeof PanelRuleBody>): Promise<unknown> {
+    let def: RuleDef;
+    try {
+      def = parseRuleDef({ ...dto, methods: dto.methods ? dto.methods.toUpperCase().split(',') : undefined }, 'panel');
+      compileSafeRegex(def.pattern, def.flags ?? 'i');
+    } catch (e) {
+      throw new ApiError(400, 'RULE_REJECTED', `Rule rejected: ${(e as Error).message}`, { error: (e as Error).message });
+    }
+    if (this.config.fileRules.some((r) => r.id === def.id)) {
+      throw new ApiError(409, 'RULE_ID_TAKEN', `A built-in rule already uses the id "${def.id}"`, { id: def.id });
+    }
+    const broad = tooBroad(def);
+    if (broad) throw new ApiError(400, 'RULE_TOO_BROAD', `The pattern also matches normal traffic (${broad}); it would block or penalize every visitor`, { sample: broad });
+    const others = this.config.panelRules.filter((r) => r.id !== def.id);
+    if (others.length >= MAX_PANEL_RULES) throw new ApiError(400, 'RULE_LIMIT', `At most ${MAX_PANEL_RULES} panel rules`, { max: MAX_PANEL_RULES });
+    await this.applyPanelRules([...others, def]);
+    logger.warn(`Regla del panel guardada: ${def.id}`, 'Admin');
+    return { rule: def };
+  }
+
+  @Delete('panel-rules')
+  async deletePanelRule(@ValidQuery(PanelRuleQuery) q: Infer<typeof PanelRuleQuery>): Promise<unknown> {
+    if (!this.config.panelRules.some((r) => r.id === q.id)) throw new ApiError(404, 'RULE_NOT_FOUND', `No panel rule with id "${q.id}"`, { id: q.id });
+    await this.applyPanelRules(this.config.panelRules.filter((r) => r.id !== q.id));
+    logger.warn(`Regla del panel eliminada: ${q.id}`, 'Admin');
+    return { removed: true };
+  }
+
+  /** Activa el nuevo conjunto de reglas del panel; si no compila o no se puede guardar, queda el anterior. */
+  private async applyPanelRules(list: RuleDef[]): Promise<void> {
+    const prev = this.config.rules;
+    const prevPanel = this.config.panelRules;
+    this.config.rules = { ...prev, rules: [...this.config.fileRules, ...list] };
+    try {
+      this.rules.compile();
+      await this.config.writePanelRules(list);
+    } catch (e) {
+      this.config.rules = prev;
+      this.config.panelRules = prevPanel;
+      this.rules.compile();
+      throw new ApiError(400, 'RULE_REJECTED', `Rule rejected, previous rules kept: ${(e as Error).message}`, { error: (e as Error).message });
+    }
+  }
+
   @Post('rules/reload')
   @HttpCode(200)
   async reload(): Promise<unknown> {
-    const prev = { rules: this.config.rules, sites: this.config.sites, bots: this.config.bots };
+    const prev = { rules: this.config.rules, fileRules: this.config.fileRules, panelRules: this.config.panelRules, sites: this.config.sites, bots: this.config.bots };
     try {
       await this.config.loadFiles();
       const summary = this.rules.compile();
@@ -429,6 +512,8 @@ export class AdminController {
     } catch (e) {
       // Restaurar configuración anterior: una regla mala nunca deja a SmartGuard sin reglas
       this.config.rules = prev.rules;
+      this.config.fileRules = prev.fileRules;
+      this.config.panelRules = prev.panelRules;
       this.config.sites = prev.sites;
       this.config.bots = prev.bots;
       this.rules.compile();

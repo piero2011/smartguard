@@ -34,6 +34,22 @@ export interface SavedState {
   bans: BanItem[];
   bots: { pattern: string; note?: string; expiresAt?: number }[];
   networks: { asn: number; note?: string }[];
+  /** reglas creadas desde el panel */
+  rules?: PanelRuleItem[];
+}
+
+interface PanelRuleItem {
+  id: string;
+  name?: string;
+  enabled?: boolean;
+  target?: string;
+  pattern: string;
+  methods?: string[];
+  score: number;
+  severity: string;
+  confidence?: string;
+  category: string;
+  action?: string;
 }
 
 /**
@@ -50,6 +66,25 @@ export function remaining(expiresAt: number | undefined, now = Date.now()): stri
 /** Peticiones a la API que reproducen un estado guardado. Lo caducado se omite. */
 export function importPlan(state: SavedState, now = Date.now()): { label: string; path: string; body: Record<string, unknown> }[] {
   const plan: { label: string; path: string; body: Record<string, unknown> }[] = [];
+  for (const r of state.rules ?? []) {
+    plan.push({
+      label: `regla ${r.id}`,
+      path: '/admin/panel-rules',
+      body: {
+        id: r.id,
+        name: r.name || undefined,
+        enabled: r.enabled,
+        target: r.target ?? 'path',
+        pattern: r.pattern,
+        methods: (r.methods ?? []).filter((m) => m !== 'ANY').join(',') || undefined,
+        score: r.score,
+        severity: r.severity,
+        confidence: r.confidence,
+        category: r.category,
+        action: r.action,
+      },
+    });
+  }
   for (const a of state.allow) {
     const ttl = remaining(a.expiresAt, now);
     if (ttl === null) continue;
@@ -72,13 +107,18 @@ export function importPlan(state: SavedState, now = Date.now()): { label: string
   return plan;
 }
 
-async function api(method: string, path: string, body?: unknown): Promise<{ status: number; json: unknown }> {
+async function api(method: string, path: string, body?: unknown, attempt = 0): Promise<{ status: number; json: unknown }> {
   const res = await fetch(`${process.env['SG_API'] ?? 'http://127.0.0.1:3100'}${path}`, {
     method,
     headers: { authorization: `Bearer ${process.env['SG_TOKEN'] ?? ''}`, ...(body ? { 'content-type': 'application/json' } : {}) },
     body: body ? JSON.stringify(body) : undefined,
     signal: AbortSignal.timeout(30_000),
   });
+  // la API admite 120 peticiones por minuto: si se agota, se espera y se repite
+  if (res.status === 429 && attempt < 8) {
+    await new Promise((r) => setTimeout(r, 15_000));
+    return api(method, path, body, attempt + 1);
+  }
   const text = await res.text();
   let json: unknown = null;
   try {
@@ -109,10 +149,11 @@ export async function exportState(file: string): Promise<void> {
     bans,
     bots: (await get<{ items: SavedState['bots'] }>('/admin/blocked-bots')).items ?? [],
     networks: (await get<{ items: SavedState['networks'] }>('/admin/blocked-networks')).items.map((n) => ({ asn: n.asn, note: n.note })),
+    rules: (await get<{ items: PanelRuleItem[] }>('/admin/panel-rules')).items ?? [],
   };
   writeFileSync(file, JSON.stringify(state, null, 2), { mode: 0o600 });
   const manual = state.bans.filter((b) => b.source === 'MANUAL' && b.scope === 'ip' && !b.audit).length;
-  console.log(`  lista blanca: ${state.allow.length} · bloqueos manuales de IP: ${manual} · bots: ${state.bots.length} · redes: ${state.networks.length}`);
+  console.log(`  reglas del panel: ${state.rules?.length ?? 0} · lista blanca: ${state.allow.length} · bloqueos manuales de IP: ${manual} · bots: ${state.bots.length} · redes: ${state.networks.length}`);
 }
 
 export async function importState(file: string): Promise<void> {

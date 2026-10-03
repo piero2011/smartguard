@@ -27,7 +27,12 @@ export type ApiErrorCode =
   | 'NETWORK_PROTECTED'
   | 'NETWORK_ALREADY_BLOCKED'
   | 'NETWORK_FETCH_FAILED'
-  | 'NETWORK_NOT_BLOCKED';
+  | 'NETWORK_NOT_BLOCKED'
+  | 'RULE_REJECTED'
+  | 'RULE_ID_TAKEN'
+  | 'RULE_TOO_BROAD'
+  | 'RULE_LIMIT'
+  | 'RULE_NOT_FOUND';
 
 export class ApiError extends HttpException {
   constructor(status: number, code: ApiErrorCode, message: string, params: Record<string, unknown> = {}) {

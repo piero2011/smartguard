@@ -367,7 +367,7 @@ sudo smartguard status | ip <IP> | ban <IP> [1h] [motivo] | unban <IP> | allow <
 | GET | `/admin/blocked-bots` (bots bloqueados por nombre) | token |
 | POST | `/admin/blocked-bots` `{pattern, note?, ttl?}` — texto a buscar en el User-Agent | token |
 | DELETE | `/admin/blocked-bots?pattern=` | token |
-| GET | `/admin/stats?minutes=` · `/admin/events?limit=&from=&to=&ip=` (rango en ms e IP: busca en todos los eventos guardados) · `/admin/events/page?limit=&cursor=&kind=&q=&from=&to=` (paginado por cursor; lo usa el panel) · `/admin/system` (versión, disco, memoria y Redis que ocupa SmartGuard) · `/admin/sites` (sitios de Nginx y cuáles están protegidos) · `/admin/rules` | token |
+| GET | `/admin/stats?minutes=` · `/admin/events?limit=&from=&to=&ip=` (rango en ms e IP: busca en todos los eventos guardados) · `/admin/events/page?limit=&cursor=&kind=&q=&from=&to=` (paginado por cursor; lo usa el panel) · `/admin/system` (versión, disco, memoria y Redis que ocupa SmartGuard) · `/admin/sites` (sitios de Nginx y cuáles están protegidos) · `/admin/panel-rules` (GET/POST/DELETE: reglas creadas desde el panel, guardadas en `/var/lib/smartguard/panel-rules.json`) · `/admin/rules` | token |
 | POST | `/admin/rules/reload` | token |
 | GET/POST | `/admin/mode` `{audit}` | token |
 | GET | `/dashboard/` | loopback (datos con token) |

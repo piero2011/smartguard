@@ -5,11 +5,13 @@ import { Tab, Ui } from './ui';
 import { ManageComponent } from './manage.component';
 import { SitesComponent } from './sites.component';
 import { SitePickerComponent } from './site-picker.component';
+import { RulesComponent } from './rules.component';
+import { BackupComponent } from './backup.component';
 import { AllowlistComponent, BansComponent, BlockedBotsComponent, BlockedNetworksComponent, EventsComponent, OverviewComponent } from './tables.component';
 
 @Component({
   selector: 'sg-root',
-  imports: [TPipe, ManageComponent, SitesComponent, SitePickerComponent, OverviewComponent, BansComponent, BlockedBotsComponent, BlockedNetworksComponent, AllowlistComponent, EventsComponent],
+  imports: [TPipe, ManageComponent, SitesComponent, SitePickerComponent, RulesComponent, BackupComponent, OverviewComponent, BansComponent, BlockedBotsComponent, BlockedNetworksComponent, AllowlistComponent, EventsComponent],
   template: `
   <header>
     <div class="brand">
@@ -66,6 +68,8 @@ import { AllowlistComponent, BansComponent, BlockedBotsComponent, BlockedNetwork
         @case ('blocked') { <sg-bans /> <sg-blocked-networks /> <sg-blocked-bots /> }
         @case ('allowlist') { <sg-allowlist /> }
         @case ('events') { <sg-events /> }
+        @case ('rules') { <sg-rules /> }
+        @case ('backup') { <sg-backup /> }
       }
     </main>
   }
@@ -92,7 +96,7 @@ export class AppComponent implements OnInit, OnDestroy {
   readonly ui = inject(Ui);
   private readonly api = inject(Api);
 
-  readonly tabs: Tab[] = ['overview', 'manage', 'blocked', 'allowlist', 'events'];
+  readonly tabs: Tab[] = ['overview', 'manage', 'rules', 'blocked', 'allowlist', 'events', 'backup'];
   readonly tab = this.ui.tab;
   readonly connected = signal(false);
   readonly tokenInput = signal('');
@@ -105,7 +109,7 @@ export class AppComponent implements OnInit, OnDestroy {
     if (this.api.token()) await this.verify();
     this.timer = setInterval(() => {
       // con la pestaña del navegador en segundo plano no se consulta nada
-      if (this.connected() && this.tab() !== 'manage' && !document.hidden) this.refresh();
+      if (this.connected() && !['manage', 'rules', 'backup'].includes(this.tab()) && !document.hidden) this.refresh();
     }, 30_000);
   }
 

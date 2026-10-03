@@ -25,8 +25,8 @@ function readStoredTheme(): Theme {
   }
 }
 
-export type Tab = 'overview' | 'manage' | 'blocked' | 'allowlist' | 'events';
-const TABS: Tab[] = ['overview', 'manage', 'blocked', 'allowlist', 'events'];
+export type Tab = 'overview' | 'manage' | 'rules' | 'blocked' | 'allowlist' | 'events' | 'backup';
+const TABS: Tab[] = ['overview', 'manage', 'rules', 'blocked', 'allowlist', 'events', 'backup'];
 const RANGES = [60, 360, 1440];
 
 /**

@@ -36,6 +36,10 @@ export const DEFAULT_BEHAVIOR: BehaviorConfig = {
 export class ConfigService {
   readonly env: EnvConfig;
   rules!: RulesFile;
+  /** reglas de los archivos (rules.yaml + rules.d): no se pueden cambiar desde el panel */
+  fileRules: RuleDef[] = [];
+  /** reglas creadas desde el panel; se guardan en panelRulesFile, fuera de /etc (solo lectura para el servicio) */
+  panelRules: RuleDef[] = [];
   sites!: SitesFile;
   bots!: BotsFile;
   /** host normalizado → sitio */
@@ -55,6 +59,9 @@ export class ConfigService {
     const rules = parseRulesFile(rulesRaw);
     // reglas adicionales en rules.d/*.yaml (personalizadas, preservadas por update.sh)
     for (const extra of await this.readRulesDir()) rules.rules.push(...extra);
+    const fileRules = [...rules.rules];
+    const panelRules = await this.readPanelRules(new Set(fileRules.map((r) => r.id)));
+    rules.rules.push(...panelRules);
     const sites = parseSitesFile(sitesRaw);
     const bots = parseBotsFile(botsRaw);
 
@@ -63,14 +70,56 @@ export class ConfigService {
       for (const h of [s.name, ...s.aliases]) index.set(h, s);
     }
     this.rules = rules;
+    this.fileRules = fileRules;
+    this.panelRules = panelRules;
     this.sites = sites;
     this.bots = bots;
     this.hostIndex = index;
   }
 
+  /** /var/lib/smartguard/panel-rules.json (junto al estado del analizador: carpeta escribible por el servicio). */
+  get panelRulesFile(): string {
+    return path.join(path.dirname(this.env.analyzerStateFile), 'panel-rules.json');
+  }
+
+  /**
+   * Reglas del panel. Un archivo ilegible o una regla inválida no impiden arrancar: esa regla se
+   * descarta (las de los archivos siguen activas). Si un id choca con uno de archivo, gana el archivo.
+   */
+  private async readPanelRules(fileIds: Set<string>): Promise<RuleDef[]> {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(await fs.readFile(this.panelRulesFile, 'utf8'));
+    } catch {
+      return [];
+    }
+    const list = isObj(raw) && Array.isArray(raw.rules) ? raw.rules : [];
+    const out: RuleDef[] = [];
+    for (const [i, r] of list.entries()) {
+      try {
+        const def = parseRuleDef(r, `panel#${i}`);
+        if (!fileIds.has(def.id) && !out.some((x) => x.id === def.id)) out.push(def);
+      } catch {
+        /* regla corrupta: se ignora */
+      }
+    }
+    return out;
+  }
+
+  /** Guarda las reglas del panel de forma atómica (archivo temporal + rename). */
+  async writePanelRules(list: RuleDef[]): Promise<void> {
+    const file = this.panelRulesFile;
+    const tmp = `${file}.${process.pid}.tmp`;
+    await fs.writeFile(tmp, JSON.stringify({ version: 1, rules: list }, null, 2), { mode: 0o640 });
+    await fs.rename(tmp, file);
+    this.panelRules = list;
+  }
+
   /** Configuración cargada desde objetos (tests). */
   loadFromObjects(rules: unknown, sites: unknown, bots: unknown): void {
     this.rules = parseRulesFile(rules);
+    this.fileRules = [...this.rules.rules];
+    this.panelRules = [];
     this.sites = parseSitesFile(sites);
     this.bots = parseBotsFile(bots);
     this.hostIndex.clear();
