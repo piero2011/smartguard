@@ -77,7 +77,9 @@ confirm() {
 env_get() {
   local key=$1 file=${2:-$SG_ENV}
   [ -r "$file" ] || { echo ""; return 0; }
-  grep -E "^${key}=" "$file" | tail -n1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//"
+  # "|| true": una variable que no está en el archivo devuelve vacío, no un error (con pipefail y
+  # set -e, el grep sin coincidencias abortaba en silencio el script que la pedía)
+  { grep -E "^${key}=" "$file" || true; } | tail -n1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//"
 }
 
 # Cambia (o añade) KEY=VALUE en el .env. VALUE solo admite caracteres seguros.
