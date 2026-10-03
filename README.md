@@ -360,6 +360,7 @@ sudo smartguard status | ip <IP> | ban <IP> [1h] [motivo] | unban <IP> | allow <
 | GET | `/admin/allow` (estática, dinámica, dominios resueltos) | token |
 | POST | `/admin/allow` `{value, type?, target?: client|host, note?, ttl?, unban?}` | token |
 | DELETE | `/admin/allow/:value` | token |
+| GET | `/admin/ipinfo?ips=a,b,c` (hasta 50) → red/ASN, organización, país de registro, ¿hosting? | token |
 | GET | `/admin/blocked-bots` (bots bloqueados por nombre) | token |
 | POST | `/admin/blocked-bots` `{pattern, note?, ttl?}` — texto a buscar en el User-Agent | token |
 | DELETE | `/admin/blocked-bots?pattern=` | token |
@@ -401,6 +402,11 @@ sudo smartguard status | ip <IP> | ban <IP> [1h] [motivo] | unban <IP> | allow <
   suspenso lo que SmartGuard decide por su cuenta. Nunca bloquean IPs de la lista blanca ni buscadores
   verificados, y se rechazan los textos que también cubren navegadores reales (`chrome`, `mozilla`…).
   Actúan sobre lo que va a PHP (auth_request); los archivos estáticos no pasan por SmartGuard.
+- Bajo cada IP se muestra **a quién pertenece**: país y organización de la red (p. ej. `US · DigitalOcean, LLC`)
+  y la etiqueta *data center* si es un proveedor de hosting (servidores, no personas). Fuente: IP→ASN de
+  Team Cymru por DNS, con caché de 24 h; solo se consulta al abrir una tabla, nunca al decidir. El país
+  es el de **registro de la red**, no geolocalización exacta. La columna *Country* usa `CF-IPCountry` cuando
+  llega (Cloudflare → Network → IP Geolocation) y, si no, ese país de registro.
 - Seguridad: solo loopback, token en `sessionStorage`, CSP `script-src 'self'` y estilos con nonce
   por petición, sin inline scripts.
 

@@ -23,6 +23,8 @@ export interface NginxLogLine {
   st?: number;
   rt?: number;
   ua?: string;
+  /** CF-IPCountry (vacío si Cloudflare no envía la cabecera de país) */
+  cc?: string;
   php?: string;
   sg?: string;
   nb?: string;
@@ -144,7 +146,7 @@ export class LogAnalyzerService implements OnApplicationBootstrap, OnModuleDestr
     }
 
     const built = buildContext(
-      { ip: rec.ip, tcpIp: rec.tcp, method: rec.m, uri: rec.p, host: rec.h, userAgent: rec.ua, requestId: rec.rid },
+      { ip: rec.ip, tcpIp: rec.tcp, method: rec.m, uri: rec.p, host: rec.h, userAgent: rec.ua, requestId: rec.rid, country: rec.cc },
       this.config,
       (ip) => this.cfRanges.isCloudflare(ip),
     );

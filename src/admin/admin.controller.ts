@@ -11,8 +11,9 @@ import { ParsedIp, ipKey, parseIp } from '../common/ip.util';
 import { formatDuration, parseDuration } from '../common/uri.util';
 import { currentMinute } from '../stats/stats.service';
 import { AllowValueParam, Infer, IpParam, ValidBody, ValidQuery } from '../common/validation';
-import { AllowBody, BanBody, BotBody, BotQuery, ListQuery, LookupQuery, ModeBody, StatsQuery, UnbanQuery } from './admin.schemas';
+import { AllowBody, BanBody, BotBody, BotQuery, IpInfoQuery, ListQuery, LookupQuery, ModeBody, StatsQuery, UnbanQuery } from './admin.schemas';
 import { BlocklistService } from '../blocklist/blocklist.service';
+import { IpInfoService } from '../ipinfo/ipinfo.service';
 import { ApiError } from '../common/api-error';
 import { logger } from '../common/logger';
 
@@ -32,6 +33,7 @@ export class AdminController {
     private readonly mode: ModeService,
     private readonly cfRanges: CloudflareRangesService,
     private readonly blocklist: BlocklistService,
+    private readonly ipinfo: IpInfoService,
   ) {}
 
   private key(ip: ParsedIp): string {
@@ -242,6 +244,12 @@ export class AdminController {
       fingerprintBans,
       score,
     };
+  }
+
+  /** A quién pertenece cada IP (red/ASN, organización, país de registro, ¿hosting?). Para el panel. */
+  @Get('ipinfo')
+  async ipInfo(@ValidQuery(IpInfoQuery) q: Infer<typeof IpInfoQuery>): Promise<unknown> {
+    return { items: await this.ipinfo.lookupMany(q.ips.split(',')) };
   }
 
   @Delete('allow/:value')

@@ -182,6 +182,8 @@ const EN: Dict = {
   'ev.promptBot': 'Text to block in the User-Agent (the bot\'s own name). Every request whose User-Agent contains it is blocked, from any IP, also in AUDIT mode.\n\nUser-Agent of this event:\n{ua}',
   'ev.botBlocked': 'Bot "{pattern}" blocked.',
 
+  'ip.hosting': 'data center',
+
   'bb.title': 'Blocked bots',
   'bb.hint': 'Requests whose User-Agent contains one of these texts are blocked from any IP, also in AUDIT mode. Verified search engines and allowlisted IPs are never blocked.',
   'bb.placeholder': 'Bot name, e.g. dotbot',
@@ -389,6 +391,8 @@ const ES: Dict = {
   'ev.ipBlocked': '{ip} bloqueada durante 24 horas.',
   'ev.promptBot': 'Texto a bloquear en el User-Agent (el nombre propio del bot). Se bloquea toda petición cuyo User-Agent lo contenga, venga de la IP que venga, también en modo AUDIT.\n\nUser-Agent de este evento:\n{ua}',
   'ev.botBlocked': 'Bot "{pattern}" bloqueado.',
+
+  'ip.hosting': 'centro de datos',
 
   'bb.title': 'Bots bloqueados',
   'bb.hint': 'Las peticiones cuyo User-Agent contenga uno de estos textos se bloquean desde cualquier IP, también en modo AUDIT. Los buscadores verificados y las IPs de la lista blanca nunca se bloquean.',

@@ -253,6 +253,17 @@ describe('AUDIT_MODE=true (instalación inicial)', () => {
     expect(last!.headers['x-smartguard-decision']).toBe('WOULD_BLOCK');
   });
 
+  it('/admin/ipinfo valida la lista de IPs y no consulta DNS para IPs privadas', async () => {
+    const auth = { authorization: `Bearer ${TOKEN}` };
+    const get = (ips: string) => app.inject({ method: 'GET', url: `/admin/ipinfo?ips=${encodeURIComponent(ips)}`, headers: auth, remoteAddress: '127.0.0.1' });
+    const ok = await get('10.0.0.1,127.0.0.1');
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toEqual({ items: { '10.0.0.1': null, '127.0.0.1': null } });
+    expect((await get('no-es-ip')).statusCode).toBe(400);
+    expect((await get(Array.from({ length: 51 }, (_, i) => `10.0.0.${i}`).join(','))).statusCode).toBe(400);
+    expect((await app.inject({ method: 'GET', url: '/admin/ipinfo?ips=10.0.0.1', remoteAddress: '127.0.0.1' })).statusCode).toBe(401);
+  });
+
   it('bloqueos manuales (bot por nombre e IP) devuelven 403 también en AUDIT', async () => {
     const auth = { authorization: `Bearer ${TOKEN}` };
     const admin = (method: 'GET' | 'POST' | 'DELETE', url: string, payload?: object) =>

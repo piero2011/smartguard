@@ -69,6 +69,11 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 td.actions { white-space: nowrap; }
 td.actions button + button { margin-left: 4px; }
 code { font-size: 12px; word-break: break-all; }
+td.ip { white-space: nowrap; }
+td.ip code { word-break: normal; }
+.ipinfo { display: block; max-width: 260px; overflow: hidden; text-overflow: ellipsis; font-size: 11px; color: var(--muted); }
+.tag { margin-left: 4px; padding: 0 6px; border-radius: 999px; font-size: 10px; font-weight: 600; background: var(--warn-bg); color: var(--warn); }
+.tag.cf { background: var(--neutral-bg); color: var(--muted); }
 .toasts { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; max-width: min(460px, calc(100vw - 32px)); z-index: 20; }
 .toast { padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); cursor: pointer; box-shadow: 0 4px 16px rgba(0,0,0,.15); }
 .toast.ok { border-left: 4px solid var(--ok); }

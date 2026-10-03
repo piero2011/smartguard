@@ -2,11 +2,12 @@ import { Component, computed, effect, inject, signal } from '@angular/core';
 import { AllowList, Api, ApiErr, BanRecord, BlockedBot, SecurityEvent, Stats } from './api.service';
 import { I18n, TPipe } from './i18n';
 import { EventFilter, Ui } from './ui';
+import { IpComponent, IpInfoStore } from './ipinfo';
 
 /** Resumen: tarjetas + top rutas / IPs / reglas */
 @Component({
   selector: 'sg-overview',
-  imports: [TPipe],
+  imports: [TPipe, IpComponent],
   template: `
   @if (stats(); as s) {
     <div class="cards">
@@ -25,7 +26,7 @@ import { EventFilter, Ui } from './ui';
       <section class="card"><h2>{{ 'ov.topIps' | t }}</h2>
         <table><tr><th>IP</th><th class="num">{{ 'ov.points' | t }}</th><th></th></tr>
           @for (r of s.topIps; track r.member) {
-            <tr><td><code>{{ r.member }}</code></td><td class="num">{{ r.score }}</td>
+            <tr><td class="ip"><sg-ip [ip]="r.member" /></td><td class="num">{{ r.score }}</td>
               <td><button class="small" (click)="inspect(r.member)">{{ 'common.inspect' | t }}</button></td></tr>
           } @empty { <tr><td colspan="3" class="muted">{{ 'common.none' | t }}</td></tr> }
         </table></section>
@@ -92,7 +93,7 @@ export class OverviewComponent {
 /** IPs bloqueadas (reales y, opcionalmente, simuladas en AUDIT) */
 @Component({
   selector: 'sg-bans',
-  imports: [TPipe],
+  imports: [TPipe, IpComponent],
   template: `
   <section class="card">
     <div class="row between">
@@ -106,7 +107,7 @@ export class OverviewComponent {
         <th>{{ 'bl.mode' | t }}</th><th>{{ 'bl.action' | t }}</th></tr>
       @for (b of items(); track b.scope + b.key + b.audit) {
         <tr>
-          <td><code>{{ b.scope === 'ip' ? b.key : b.ip }}</code></td><td class="num">{{ b.score }}</td><td>{{ b.reason }}</td>
+          <td class="ip"><sg-ip [ip]="b.scope === 'ip' ? b.key : b.ip" /></td><td class="num">{{ b.score }}</td><td>{{ b.reason }}</td>
           <td>{{ b.scope === 'ip' ? 'IP' : 'IP+UA' }}</td><td>{{ b.source }}</td><td class="num">{{ b.banCount }}</td>
           <td>{{ i18n.date(b.createdAt) }}</td><td>{{ i18n.date(b.expiresAt) }}</td>
           <td><span class="pill" [class.audit]="b.audit" [class.enforce]="!b.audit">{{ b.audit ? 'AUDIT' : 'ENFORCE' }}</span></td>
@@ -360,7 +361,7 @@ const EVENT_FILTERS: Record<EventFilter, (e: SecurityEvent) => boolean> = {
 /** Eventos de seguridad recientes */
 @Component({
   selector: 'sg-events',
-  imports: [TPipe],
+  imports: [TPipe, IpComponent],
   template: `
   <section class="card">
     <div class="row between">
@@ -377,7 +378,7 @@ const EVENT_FILTERS: Record<EventFilter, (e: SecurityEvent) => boolean> = {
         <th>{{ 'ev.method' | t }}</th><th>{{ 'ev.uri' | t }}</th><th>{{ 'ev.status' | t }}</th><th>{{ 'ev.category' | t }}</th>
         <th class="num">{{ 'ev.delta' | t }}</th><th>{{ 'ev.reason' | t }}</th><th></th></tr>
       @for (e of shown(); track $index) {
-        <tr [title]="e.userAgent ?? ''"><td>{{ i18n.date(e.timestamp) }}</td><td>{{ e.action }}</td><td><code>{{ e.ip }}</code></td><td>{{ e.country ?? '' }}</td>
+        <tr [title]="e.userAgent ?? ''"><td>{{ i18n.date(e.timestamp) }}</td><td>{{ e.action }}</td><td class="ip"><sg-ip [ip]="e.ip" /></td><td>{{ e.country || ipinfo.get(e.ip)?.country || '' }}</td>
           <td>{{ e.host }}</td><td>{{ e.method }}</td><td><code>{{ e.uri }}</code></td><td>{{ e.status ?? '' }}</td>
           <td>{{ e.category }}</td><td class="num">{{ e.scoreDelta }}</td><td>{{ e.reason }}</td>
           <td class="actions">
@@ -395,6 +396,7 @@ export class EventsComponent {
   readonly ui = inject(Ui);
   readonly i18n = inject(I18n);
   readonly events = signal<SecurityEvent[]>([]);
+  readonly ipinfo = inject(IpInfoStore);
   readonly filters: EventFilter[] = ['all', 'log', 'suspicious', 'wouldBlock', 'blocked', 'limited', 'st403', 'st429', 'denied'];
 
   /** Eventos que pasan el filtro elegido y el texto buscado (IP, ruta, motivo, host o User-Agent). */

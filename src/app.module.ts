@@ -14,6 +14,7 @@ import { ModeService } from './scoring/mode.service';
 import { FirewallService } from './firewall/firewall.service';
 import { BanService } from './ban/ban.service';
 import { BlocklistService } from './blocklist/blocklist.service';
+import { IpInfoService } from './ipinfo/ipinfo.service';
 import { ScoringService } from './scoring/scoring.service';
 import { LogAnalyzerService } from './logs/log-analyzer.service';
 import { DecisionController } from './nginx/decision.controller';
@@ -65,6 +66,7 @@ export class AppModule {
         BotVerifierService,
         BanService,
         BlocklistService,
+        IpInfoService,
         ScoringService,
         LogAnalyzerService,
         LocalOnlyGuard,

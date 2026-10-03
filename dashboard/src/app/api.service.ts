@@ -106,6 +106,16 @@ export interface BlockedBot {
   expiresAt?: number;
 }
 
+/** A quién pertenece una IP (red, organización, país de registro de la red) */
+export interface IpInfo {
+  asn: number | null;
+  org: string;
+  country: string;
+  prefix: string;
+  hosting: boolean;
+  cloudflare: boolean;
+}
+
 export interface Explanation {
   explanation: string;
   ban: BanRecord | null;
@@ -230,6 +240,9 @@ export class Api {
   }
   unban(ip: string, keepScore: boolean): Promise<{ removed: boolean; fingerprintBans: number; reset: boolean }> {
     return this.req('DELETE', `/admin/ban/${encodeURIComponent(ip)}${keepScore ? '?reset=false' : ''}`);
+  }
+  ipInfo(ips: string[]): Promise<{ items: Record<string, IpInfo | null> }> {
+    return this.req('GET', `/admin/ipinfo?ips=${encodeURIComponent(ips.join(','))}`);
   }
   blockedBots(): Promise<{ items: BlockedBot[] }> {
     return this.req('GET', '/admin/blocked-bots');
