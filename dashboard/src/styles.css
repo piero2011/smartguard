@@ -191,3 +191,20 @@ button.bar-row.link:hover { background: var(--neutral-bg); }
 .bar-value { font-weight: 600; font-variant-numeric: tabular-nums; min-width: 44px; text-align: right; }
 .bar-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px; }
 .bar-actions .tag.done, .bar-actions sg-block button { margin-left: 0; }
+
+/* --- Selector de sitio con buscador ------------------------------------------------------- */
+.picker { position: relative; display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.picker-btn { display: inline-flex; align-items: center; gap: 8px; min-width: 200px; max-width: 320px; justify-content: space-between; font-size: 14px; background: var(--bg); }
+.picker-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picker-pop { position: absolute; right: 0; top: calc(100% + 4px); z-index: 15; width: 300px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+.picker-pop input { width: 100%; }
+.picker-pop ul { list-style: none; margin: 6px 0 0; padding: 0; max-height: 320px; overflow-y: auto; }
+.picker-pop li button { display: block; width: 100%; border: none; border-radius: 6px; background: none; padding: 6px 8px; text-align: left; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picker-pop li button:hover { background: var(--neutral-bg); }
+.picker-pop li button.active { color: var(--accent); font-weight: 600; }
+.picker-empty { padding: 6px 8px; font-size: 13px; }
+/* dentro de la barra de pestañas, el selector es un campo y no una pestaña más */
+nav .picker-btn { border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; color: var(--fg); font-weight: 400; }
+nav .picker-btn:hover:not(:disabled) { border-color: var(--accent); }
+nav .picker-pop li button { border: none; padding: 6px 8px; color: var(--fg); font-weight: 400; }
+nav .picker-pop li button.active { color: var(--accent); font-weight: 600; }

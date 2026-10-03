@@ -4,11 +4,12 @@ import { I18n, Lang, TPipe } from './i18n';
 import { Tab, Ui } from './ui';
 import { ManageComponent } from './manage.component';
 import { SitesComponent } from './sites.component';
+import { SitePickerComponent } from './site-picker.component';
 import { AllowlistComponent, BansComponent, BlockedBotsComponent, BlockedNetworksComponent, EventsComponent, OverviewComponent } from './tables.component';
 
 @Component({
   selector: 'sg-root',
-  imports: [TPipe, ManageComponent, SitesComponent, OverviewComponent, BansComponent, BlockedBotsComponent, BlockedNetworksComponent, AllowlistComponent, EventsComponent],
+  imports: [TPipe, ManageComponent, SitesComponent, SitePickerComponent, OverviewComponent, BansComponent, BlockedBotsComponent, BlockedNetworksComponent, AllowlistComponent, EventsComponent],
   template: `
   <header>
     <div class="brand">
@@ -55,12 +56,7 @@ import { AllowlistComponent, BansComponent, BlockedBotsComponent, BlockedNetwork
       @if (lastUpdate()) { <span class="muted small-text">{{ 'common.updated' | t: { time: lastUpdate() } }}</span> }
       <span class="spacer"></span>
       @if (tab() === 'overview' || tab() === 'events') {
-        <label class="lang">{{ 'site.label' | t }}
-          <select (change)="ui.site.set($any($event.target).value)">
-            <option value="" [selected]="ui.site() === ''">{{ 'site.all' | t }}</option>
-            @for (h of ui.siteOptions(); track h) { <option [value]="h" [selected]="ui.site() === h">{{ h }}</option> }
-          </select>
-        </label>
+        <sg-site-picker />
       }
     </nav>
     <main>
