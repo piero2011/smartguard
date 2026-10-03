@@ -285,27 +285,34 @@ export class AdminController {
     const now = currentMinute();
     const mins = Array.from({ length: minutes }, (_, i) => now - minutes + 1 + i);
     const hours = [...new Set(mins.map((m) => Math.floor((m * 60) / 3600)))];
+    // Un sitio puede tener varios dominios (www, alias): se agrupan bajo su nombre principal.
+    const groups = await this.nginxSites.groups();
+    const primaryOf = new Map<string, string>();
+    for (const [primary, all] of groups) for (const n of all) primaryOf.set(n, primary);
+    const names = q.host ? (groups.get(q.host) ?? [q.host]) : [];
     const [buckets, activeIps, topPaths, topIps, topRules, bansActive, wouldBans] = await Promise.all([
       this.reputation.call((s) => s.readStats(mins)),
       this.reputation.call((s) => s.readActiveIps(mins.slice(-5))),
-      this.reputation.call((s) => s.readTop('paths', hours, 15, q.host)),
-      this.reputation.call((s) => s.readTop('ips', hours, 15, q.host)),
-      this.reputation.call((s) => s.readTop('rules', hours, 15, q.host)),
+      this.readTop('paths', hours, names),
+      this.readTop('ips', hours, names),
+      this.readTop('rules', hours, names),
       this.bans.count(false),
       this.bans.count(true),
     ]);
     // Cada minuto guarda los contadores globales y, con prefijo "h:<host>:", los de cada sitio.
     // Aquí se deja en cada tramo solo lo pedido (un sitio o el total) y se anota qué sitios tienen datos.
     const seen = new Map<string, number>();
-    const own = q.host ? `${HOST_FIELD_PREFIX}${q.host}:` : '';
     for (const b of buckets) {
       const kept: Record<string, number> = {};
       for (const [k, v] of Object.entries(b.fields)) {
         if (k.startsWith(HOST_FIELD_PREFIX)) {
-          const host = k.slice(HOST_FIELD_PREFIX.length, k.lastIndexOf(':'));
-          seen.set(host, (seen.get(host) ?? 0) + v);
-          if (own && k.startsWith(own)) kept[k.slice(own.length)] = v;
-        } else if (!own) kept[k] = v;
+          const cut = k.lastIndexOf(':');
+          const host = k.slice(HOST_FIELD_PREFIX.length, cut);
+          const site = primaryOf.get(host) ?? host;
+          seen.set(site, (seen.get(site) ?? 0) + v);
+          // con un sitio elegido se suman los contadores de todos sus dominios
+          if (names.includes(host)) kept[k.slice(cut + 1)] = (kept[k.slice(cut + 1)] ?? 0) + v;
+        } else if (!q.host) kept[k] = v;
       }
       b.fields = kept;
     }
@@ -344,6 +351,19 @@ export class AdminController {
     };
   }
 
+  /** "Top" de un sitio (sumando todos sus dominios) o, sin dominios, el global. */
+  private async readTop(kind: 'paths' | 'ips' | 'rules', hours: number[], names: string[]): Promise<{ member: string; score: number }[]> {
+    if (names.length === 0) return this.reputation.call((s) => s.readTop(kind, hours, 15));
+    const agg = new Map<string, number>();
+    for (const rows of await Promise.all(names.map((n) => this.reputation.call((s) => s.readTop(kind, hours, 15, n))))) {
+      for (const r of rows) agg.set(r.member, (agg.get(r.member) ?? 0) + r.score);
+    }
+    return [...agg.entries()]
+      .map(([member, score]) => ({ member, score }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 15);
+  }
+
   @Get('events')
   async events(@ValidQuery(EventsQuery) q: Infer<typeof EventsQuery>): Promise<unknown> {
     const filtered = q.from !== undefined || q.to !== undefined || q.ip !== undefined;
@@ -369,7 +389,7 @@ export class AdminController {
       from: q.from === undefined ? undefined : Number(q.from),
       to: q.to === undefined ? undefined : Number(q.to),
       kind: q.kind,
-      host: q.host,
+      hosts: q.host ? ((await this.nginxSites.groups()).get(q.host) ?? [q.host]) : undefined,
       text: q.q?.toLowerCase() || undefined,
     };
     return this.reputation.call((s) => s.pageEvents(q.limit ?? 50, query, q.cursor));

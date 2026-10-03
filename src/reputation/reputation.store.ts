@@ -108,8 +108,8 @@ export interface EventQuery {
   from?: number;
   to?: number;
   ip?: string;
-  /** sitio (host exacto de la petición) */
-  host?: string;
+  /** sitio: cualquiera de sus dominios (host exacto de la petición) */
+  hosts?: string[];
   kind?: EventKind;
   text?: string;
 }
@@ -118,14 +118,14 @@ export function eventMatches(e: SecurityEvent, q: EventQuery): boolean {
   if (q.from !== undefined && e.timestamp < q.from) return false;
   if (q.to !== undefined && e.timestamp > q.to) return false;
   if (q.ip && e.ip !== q.ip && e.ipKey !== q.ip) return false;
-  if (q.host && e.host !== q.host) return false;
+  if (q.hosts?.length && !q.hosts.includes(e.host)) return false;
   if (q.kind && !KIND_MATCH[q.kind](e)) return false;
   if (!q.text) return true;
   return [e.ip, e.ipKey, e.uri, e.reason, e.host, e.category, e.userAgent].some((v) => String(v ?? '').toLowerCase().includes(q.text!));
 }
 
 export function eventQueryIsEmpty(q: EventQuery): boolean {
-  return q.from === undefined && q.to === undefined && !q.ip && !q.host && !q.text && (!q.kind || q.kind === 'all');
+  return q.from === undefined && q.to === undefined && !q.ip && !q.hosts?.length && !q.text && (!q.kind || q.kind === 'all');
 }
 
 /** Una página de eventos. `next` es el cursor para pedir la siguiente (null = no hay más). */

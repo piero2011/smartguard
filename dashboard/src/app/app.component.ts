@@ -133,7 +133,7 @@ export class AppComponent implements OnInit, OnDestroy {
       this.connected.set(true);
       this.authError.set('');
       // sitios protegidos, para el selector de sitio (si no se pueden leer, se usan los que tengan datos)
-      void this.api.sites().then((s) => this.ui.addSites(s.items.filter((i) => i.status !== 'none').flatMap((i) => i.names))).catch(() => undefined);
+      void this.api.sites().then((s) => this.ui.addSites(s.items.filter((i) => i.status !== 'none').map((i) => i.primary))).catch(() => undefined);
       this.lastUpdate.set(this.i18n.time(Date.now()));
     } catch (e) {
       const err = e as ApiErr;

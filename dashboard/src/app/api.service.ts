@@ -90,6 +90,8 @@ export interface Stats {
 /** Un sitio de Nginx y lo que SmartGuard hace en él, según los include de su vhost */
 export interface NginxSite {
   file: string;
+  /** nombre único del sitio aunque tenga varios dominios */
+  primary: string;
   names: string[];
   kind: 'php' | 'proxy' | 'static';
   rules: boolean;

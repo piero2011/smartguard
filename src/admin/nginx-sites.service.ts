@@ -19,6 +19,8 @@ export interface ParsedVhost {
 
 export interface NginxSite extends ParsedVhost {
   file: string;
+  /** nombre con el que se muestra el sitio: uno solo aunque tenga varios dominios (www, alias) */
+  primary: string;
   /** full = reglas + decisión · partial = solo una de las dos · none */
   status: 'full' | 'partial' | 'none';
   /** todos sus dominios están en ALLOW_HOSTS: SmartGuard no los puntúa aunque el vhost lo incluya */
@@ -38,6 +40,12 @@ const SITE_DIRS: string[][] = [
 const OWN_FILE = /^(\d+-)?smartguard\.conf$/;
 const MAX_FILE_BYTES = 512 * 1024;
 const TTL_MS = 60_000;
+
+/** Nombre principal de un sitio: el de su archivo de vhost si es uno de sus dominios; si no, el más corto. */
+export function primaryName(file: string, names: string[]): string {
+  const base = file.replace(/\.conf$/, '').toLowerCase();
+  return names.includes(base) ? base : [...names].sort((a, b) => a.length - b.length || a.localeCompare(b))[0]!;
+}
 
 /** Lee un vhost de Nginx. Los comentarios se descartan: un include comentado no protege nada. */
 export function parseVhost(text: string): ParsedVhost {
@@ -107,6 +115,7 @@ export class NginxSitesService {
         if (v.names.length === 0) continue; // no define ningún sitio (p. ej. solo maps o upstreams)
         items.push({
           file,
+          primary: primaryName(file, v.names),
           ...v,
           status: v.rules && v.decision ? 'full' : v.rules || v.decision ? 'partial' : 'none',
           exempt: false,
@@ -121,6 +130,20 @@ export class NginxSitesService {
     const value = { readable, dirs: readable ? dirs.flat() : denied.length ? denied : dirs.flat(), items };
     if (dirs === SITE_DIRS) this.cache = { at: Date.now(), value };
     return this.withExempt(value);
+  }
+
+  /**
+   * Dominios de cada sitio PROTEGIDO, por su nombre principal. Sirve para agrupar las cifras de
+   * www.tienda.com, tienda.com y sus alias bajo un solo sitio. Vacío si no se pueden leer los vhosts.
+   */
+  async groups(): Promise<Map<string, string[]>> {
+    const out = new Map<string, string[]>();
+    try {
+      for (const s of (await this.list()).items) if (s.status !== 'none') out.set(s.primary, s.names);
+    } catch {
+      /* sin vhosts legibles no se agrupa */
+    }
+    return out;
   }
 
   /**

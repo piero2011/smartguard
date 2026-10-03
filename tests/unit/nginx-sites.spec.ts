@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { NginxSitesService, parseVhost } from '../../src/admin/nginx-sites.service';
+import { NginxSitesService, parseVhost, primaryName } from '../../src/admin/nginx-sites.service';
 
 const PROTECTED = `
 # include /etc/nginx/smartguard/auth-php.conf;  (comentario: no cuenta)
@@ -29,6 +29,11 @@ describe('Sitios de Nginx protegidos', () => {
     expect(parseVhost('server { server_name s.test; include /etc/nginx/smartguard/server.conf; root /var/www; }')).toMatchObject({ kind: 'static', rules: true, decision: false });
   });
 
+  it('nombre principal: el del archivo del vhost si es uno de sus dominios; si no, el más corto', () => {
+    expect(primaryName('shop.test.conf', ['www.shop.test', 'shop.test', 'www1.shop.test'])).toBe('shop.test');
+    expect(primaryName('custom-domain.conf', ['panel.shop.test', 'cp.shop.test'])).toBe('cp.shop.test');
+  });
+
   it('lista los sitios de una carpeta: protegidos primero, exentos marcados, sin los archivos propios', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'sg-sites-'));
     await fs.mkdir(path.join(dir, 'vista-vacia'));
@@ -39,10 +44,11 @@ describe('Sitios de Nginx protegidos', () => {
     const svc = new NginxSitesService({ hostAllowed: (h: string) => h === 'api.shop.test' } as never);
     const r = await svc.list([[path.join(dir, 'vista-vacia'), dir], [path.join(dir, 'no-existe')]]);
     expect(r.readable).toBe(true);
-    expect(r.items.map((s) => [s.file, s.status, s.exempt])).toEqual([
-      ['shop.test.conf', 'full', false],
-      ['api.shop.test.conf', 'none', true],
+    expect(r.items.map((s) => [s.file, s.primary, s.status, s.exempt])).toEqual([
+      ['shop.test.conf', 'shop.test', 'full', false],
+      ['api.shop.test.conf', 'api.shop.test', 'none', true],
     ]);
+    expect(await svc.groups()).toEqual(new Map());
     await fs.rm(dir, { recursive: true });
   });
 });

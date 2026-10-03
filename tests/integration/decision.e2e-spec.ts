@@ -7,6 +7,7 @@ import { configureApp, createAdapter } from '../../src/main';
 import { BlocklistService } from '../../src/blocklist/blocklist.service';
 import { IpInfoService } from '../../src/ipinfo/ipinfo.service';
 import { StatsService } from '../../src/stats/stats.service';
+import { NginxSitesService } from '../../src/admin/nginx-sites.service';
 import { testEnv } from '../helpers';
 
 const SECRET = 'test-decision-secret-0123456789';
@@ -366,5 +367,23 @@ describe('Estadísticas por sitio (API)', () => {
     expect(events.items.length).toBeGreaterThanOrEqual(1);
     expect(events.items.every((e: { host: string }) => e.host === 'otra-tienda.test')).toBe(true);
     expect((await get('/admin/stats?host=No%20Valido')).statusCode).toBe(400);
+  });
+
+  it('los dominios de un mismo sitio (www, alias) se agrupan bajo un solo nombre', async () => {
+    const get = (url: string) => app.inject({ method: 'GET', url, headers: { authorization: `Bearer ${TOKEN}` }, remoteAddress: '127.0.0.1' });
+    // como si Nginx tuviera un vhost protegido con esos dos dominios
+    app.get(NginxSitesService).groups = async () => new Map([['grupo.test', ['www.grupo.test', 'grupo.test']]]);
+    await decide('198.51.100.130', '/.env', { 'x-host': 'grupo.test' });
+    await decide('198.51.100.131', '/.git/config', { 'x-host': 'www.grupo.test' });
+    await decide('198.51.100.132', '/', { 'x-host': 'www.grupo.test' });
+    await app.get(StatsService).flush();
+    const all = (await get('/admin/stats?minutes=5')).json();
+    expect(all.hosts).toContain('grupo.test');
+    expect(all.hosts).not.toContain('www.grupo.test');
+    const one = (await get('/admin/stats?minutes=5&host=grupo.test')).json();
+    expect(one.totals.requests).toBe(3);
+    expect(one.topPaths.map((p: { member: string }) => p.member).sort()).toEqual(['/.env', '/.git/config']);
+    const events = (await get('/admin/events/page?limit=50&host=grupo.test')).json();
+    expect(new Set(events.items.map((e: { host: string }) => e.host))).toEqual(new Set(['grupo.test', 'www.grupo.test']));
   });
 });
