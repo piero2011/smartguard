@@ -24,7 +24,10 @@ const SNIPPET = `server {
   <section class="card">
     <div class="row between">
       <h2>{{ 'st.title' | t }} @if (data(); as d) { ({{ protectedCount() }} / {{ d.items.length }}) }</h2>
-      <button class="small" (click)="load()">{{ 'common.refresh' | t }}</button>
+      <div class="row">
+        <input type="search" [placeholder]="'st.search' | t" [value]="query()" (input)="query.set($any($event.target).value); wanted.set(1)">
+        <button class="small" (click)="load()">{{ 'common.refresh' | t }}</button>
+      </div>
     </div>
     <p class="muted sub">{{ 'st.hint' | t }}</p>
     @if (data(); as d) {
@@ -44,9 +47,9 @@ const SNIPPET = `server {
             <td>{{ (s.decision ? 'common.yes' : 'common.no') | t }}</td>
             <td class="muted"><code>{{ s.file }}</code></td>
           </tr>
-        } @empty { <tr><td colspan="7" class="muted">{{ 'common.none' | t }}</td></tr> }
+        } @empty { <tr><td colspan="7" class="muted">{{ (query() ? 'st.noMatch' : 'common.none') | t }}</td></tr> }
       </table></div>
-      <sg-pager [page]="page()" [total]="d.items.length" (go)="wanted.set($event)" />
+      <sg-pager [page]="page()" [total]="filtered().length" (go)="wanted.set($event)" />
       <div class="status">
         @if (picked().size === 0) {
           <p class="muted">{{ 'st.pickHint' | t }}</p>
@@ -84,8 +87,18 @@ export class SitesComponent {
   readonly data = signal<NginxSites | null>(null);
   readonly snippet = SNIPPET;
   readonly wanted = signal(1);
-  readonly page = computed(() => Math.min(this.wanted(), pageCount(this.data()?.items.length ?? 0)));
-  readonly shown = computed(() => pageOf(this.data()?.items ?? [], this.page()));
+  /** texto del buscador: dominio, archivo del vhost, tipo o estado */
+  readonly query = signal('');
+  readonly filtered = computed(() => {
+    const q = this.query().trim().toLowerCase();
+    const items = this.data()?.items ?? [];
+    if (!q) return items;
+    return items.filter((s) =>
+      [...s.names, s.file, this.i18n.t('st.kind.' + s.kind), this.i18n.t('st.s.' + s.status), s.exempt ? this.i18n.t('st.exempt') : ''].some((v) => v.toLowerCase().includes(q)),
+    );
+  });
+  readonly page = computed(() => Math.min(this.wanted(), pageCount(this.filtered().length)));
+  readonly shown = computed(() => pageOf(this.filtered(), this.page()));
   /** archivos de vhost marcados para proteger */
   readonly picked = signal<ReadonlySet<string>>(new Set());
   readonly emptySet: ReadonlySet<string> = new Set();

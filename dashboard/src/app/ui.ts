@@ -26,6 +26,24 @@ function readStoredTheme(): Theme {
 }
 
 export type Tab = 'overview' | 'manage' | 'blocked' | 'allowlist' | 'events';
+const TABS: Tab[] = ['overview', 'manage', 'blocked', 'allowlist', 'events'];
+const RANGES = [60, 360, 1440];
+
+/**
+ * Dónde está el usuario, guardado en el fragmento de la URL (#tab=events&site=tienda.com&range=360)
+ * para que recargar la página lo deje en el mismo sitio. Sin fragmento se abre el Resumen.
+ */
+function readRoute(): { tab: Tab; site: string; range: number } {
+  const p = new URLSearchParams(location.hash.replace(/^#/, ''));
+  const tab = p.get('tab') as Tab;
+  const site = (p.get('site') ?? '').toLowerCase();
+  const range = Number(p.get('range'));
+  return {
+    tab: TABS.includes(tab) ? tab : 'overview',
+    site: /^[a-z0-9]([a-z0-9.-]{0,98}[a-z0-9])?$/.test(site) ? site : '',
+    range: RANGES.includes(range) ? range : 60,
+  };
+}
 
 /** Filtros de la pestaña Eventos (los fija también cada tarjeta del Resumen al pulsarla). */
 export type EventFilter = 'all' | 'log' | 'suspicious' | 'wouldBlock' | 'blocked' | 'limited' | 'st403' | 'st429' | 'denied';
@@ -33,13 +51,14 @@ export type EventFilter = 'all' | 'log' | 'suspicious' | 'wouldBlock' | 'blocked
 /** Avisos (toasts) + "tick" de refresco + navegación compartidos entre pestañas. */
 @Injectable({ providedIn: 'root' })
 export class Ui {
-  readonly tab = signal<Tab>('overview');
+  private readonly route = readRoute();
+  readonly tab = signal<Tab>(this.route.tab);
   /** Sitio elegido en la cabecera para Resumen y Eventos ('' = todos los protegidos) */
-  readonly site = signal('');
+  readonly site = signal(this.route.site);
   /** Sitios que ofrece el selector: los protegidos según Nginx más los que tienen datos */
   readonly siteOptions = signal<string[]>([]);
   /** Ventana de tiempo del Resumen, en minutos */
-  readonly overviewMinutes = signal(60);
+  readonly overviewMinutes = signal(this.route.range);
   /** Tema del panel: el del sistema por defecto; si se fija uno, se recuerda en este navegador */
   readonly theme = signal<Theme>(readStoredTheme());
   readonly eventFilter = signal<EventFilter>('all');
@@ -58,6 +77,22 @@ export class Ui {
   private seq = 0;
 
   constructor() {
+    // el sitio de la URL se ofrece en el selector aunque aún no se haya cargado la lista
+    if (this.route.site) this.siteOptions.set([this.route.site]);
+    effect(() => {
+      const p = new URLSearchParams({ tab: this.tab() });
+      if (this.site()) p.set('site', this.site());
+      if (this.overviewMinutes() !== 60) p.set('range', String(this.overviewMinutes()));
+      // replaceState: cambiar de pestaña no llena el historial del navegador
+      history.replaceState(null, '', `#${p}`);
+    });
+    // si se edita la URL a mano o se pega un enlace en la misma pestaña
+    addEventListener('hashchange', () => {
+      const r = readRoute();
+      this.tab.set(r.tab);
+      this.site.set(r.site);
+      this.overviewMinutes.set(r.range);
+    });
     effect(() => {
       // en "auto" no se marca nada: decide la media query prefers-color-scheme del CSS
       if (this.theme() === 'auto') delete document.documentElement.dataset['theme'];
