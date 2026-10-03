@@ -21,6 +21,7 @@ import { DecisionController } from './nginx/decision.controller';
 import { HealthController } from './health/health.controller';
 import { AdminController } from './admin/admin.controller';
 import { SystemInfoService } from './admin/system-info.service';
+import { NginxSitesService } from './admin/nginx-sites.service';
 import { DashboardController } from './dashboard/dashboard.controller';
 import { AdminAuthGuard, LocalOnlyGuard } from './common/security';
 
@@ -69,6 +70,7 @@ export class AppModule {
         BlocklistService,
         IpInfoService,
         SystemInfoService,
+        NginxSitesService,
         ScoringService,
         LogAnalyzerService,
         LocalOnlyGuard,

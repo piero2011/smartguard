@@ -1,6 +1,6 @@
 {
   "name": "smartguard-dashboard",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "private": true,
   "description": "SmartGuard admin dashboard (Angular). Served by SmartGuard at http://127.0.0.1:3100/dashboard/",
   "scripts": {

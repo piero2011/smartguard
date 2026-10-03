@@ -1,0 +1,104 @@
+import { Injectable } from '@nestjs/common';
+import { promises as fs } from 'node:fs';
+import * as path from 'node:path';
+import { AllowlistService } from '../whitelist/allowlist.service';
+
+/** Qué hace SmartGuard en un sitio de Nginx, según los include de su vhost. */
+export interface ParsedVhost {
+  /** dominios de sus server_name (sin duplicados) */
+  names: string[];
+  /** php = WordPress u otra app PHP (fastcgi) · proxy = aplicativo detrás de proxy_pass · static */
+  kind: 'php' | 'proxy' | 'static';
+  /** server.conf: reglas Nginx nuevas, límites por endpoint y log de seguridad */
+  rules: boolean;
+  /** auth.conf + auth-php.conf: cada petición dinámica consulta la decisión de SmartGuard */
+  decision: boolean;
+  /** static-log.conf: se registran los 4xx de archivos estáticos */
+  staticLog: boolean;
+}
+
+export interface NginxSite extends ParsedVhost {
+  file: string;
+  /** full = reglas + decisión · partial = solo una de las dos · none */
+  status: 'full' | 'partial' | 'none';
+  /** todos sus dominios están en ALLOW_HOSTS: SmartGuard no los puntúa aunque el vhost lo incluya */
+  exempt: boolean;
+}
+
+const SITE_DIRS = ['/etc/nginx/sites-enabled', '/etc/nginx/conf.d'];
+/** archivos propios de SmartGuard (contexto http), no son sitios */
+const OWN_FILE = /^(\d+-)?smartguard\.conf$/;
+const MAX_FILE_BYTES = 512 * 1024;
+const TTL_MS = 60_000;
+
+/** Lee un vhost de Nginx. Los comentarios se descartan: un include comentado no protege nada. */
+export function parseVhost(text: string): ParsedVhost {
+  const code = text
+    .split('\n')
+    .map((l) => l.replace(/(^|\s)#.*$/, ''))
+    .join('\n');
+  const names = new Set<string>();
+  for (const m of code.matchAll(/\bserver_name\s+([^;]+);/g)) {
+    for (const n of m[1]!.split(/\s+/)) if (n && n !== '_') names.add(n.toLowerCase());
+  }
+  const has = (file: string) => new RegExp(`\\binclude\\s+[^;]*smartguard/${file}\\s*;`).test(code);
+  return {
+    names: [...names],
+    kind: /\bfastcgi_pass\s/.test(code) ? 'php' : /\bproxy_pass\s/.test(code) ? 'proxy' : 'static',
+    rules: has('server\\.conf'),
+    decision: has('auth\\.conf') && has('auth-php\\.conf'),
+    staticLog: has('static-log\\.conf'),
+  };
+}
+
+/**
+ * Sitios que Nginx tiene configurados y cuáles pasan por SmartGuard. Solo lectura de los vhosts;
+ * si el servicio no tiene permiso para leerlos, lo indica en lugar de adivinar.
+ */
+@Injectable()
+export class NginxSitesService {
+  private cache: { at: number; value: { readable: boolean; dirs: string[]; items: NginxSite[] } } | null = null;
+
+  constructor(private readonly allowlist: AllowlistService) {}
+
+  async list(dirs: string[] = SITE_DIRS): Promise<{ readable: boolean; dirs: string[]; items: NginxSite[] }> {
+    if (this.cache && Date.now() - this.cache.at < TTL_MS && dirs === SITE_DIRS) return this.cache.value;
+    const items: NginxSite[] = [];
+    let found = 0;
+    let unreadable = 0;
+    for (const dir of dirs) {
+      let files: string[];
+      try {
+        files = (await fs.readdir(dir)).filter((f) => f.endsWith('.conf') && !OWN_FILE.test(f)).sort();
+      } catch {
+        continue;
+      }
+      for (const file of files) {
+        found++;
+        let text: string;
+        try {
+          const abs = path.join(dir, file);
+          if ((await fs.stat(abs)).size > MAX_FILE_BYTES) continue;
+          text = await fs.readFile(abs, 'utf8');
+        } catch {
+          unreadable++;
+          continue;
+        }
+        const v = parseVhost(text);
+        if (v.names.length === 0) continue; // no define ningún sitio (p. ej. solo maps o upstreams)
+        items.push({
+          file,
+          ...v,
+          status: v.rules && v.decision ? 'full' : v.rules || v.decision ? 'partial' : 'none',
+          exempt: v.names.every((n) => this.allowlist.hostAllowed(n)),
+        });
+      }
+    }
+    // primero los protegidos; dentro de cada grupo, por nombre
+    const rank = { full: 0, partial: 1, none: 2 };
+    items.sort((a, b) => rank[a.status] - rank[b.status] || a.names[0]!.localeCompare(b.names[0]!));
+    const value = { readable: found === 0 || unreadable < found, dirs, items };
+    if (dirs === SITE_DIRS) this.cache = { at: Date.now(), value };
+    return value;
+  }
+}

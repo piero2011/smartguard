@@ -94,6 +94,11 @@ tr.link:hover { background: var(--neutral-bg); }
 .pill { padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
 .pill.audit { background: var(--warn-bg); color: var(--warn); }
 .pill.enforce { background: var(--ok-bg); color: var(--ok); }
+.pill.off { background: var(--neutral-bg); color: var(--muted); }
+code.name { display: block; word-break: normal; }
+ol.steps { margin: 4px 0 12px; padding-left: 20px; }
+ol.steps li { margin: 4px 0; }
+pre.snippet { padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--neutral-bg); overflow-x: auto; white-space: pre; margin-bottom: 12px; }
 .scroll { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }

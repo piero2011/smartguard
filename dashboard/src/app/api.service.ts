@@ -85,6 +85,25 @@ export interface Stats {
   degraded: boolean;
 }
 
+/** Un sitio de Nginx y lo que SmartGuard hace en él, según los include de su vhost */
+export interface NginxSite {
+  file: string;
+  names: string[];
+  kind: 'php' | 'proxy' | 'static';
+  rules: boolean;
+  decision: boolean;
+  staticLog: boolean;
+  status: 'full' | 'partial' | 'none';
+  exempt: boolean;
+}
+
+export interface NginxSites {
+  /** false = el servicio no tiene permiso para leer los vhosts */
+  readable: boolean;
+  dirs: string[];
+  items: NginxSite[];
+}
+
 /** Versión instalada y lo que ocupa SmartGuard en el servidor */
 export interface SystemInfo {
   version: string;
@@ -254,6 +273,9 @@ export class Api {
   }
   bans(audit: boolean, offset = 0, limit = 500): Promise<{ total: number; items: BanRecord[] }> {
     return this.req('GET', `/admin/bans?audit=${audit}&offset=${offset}&limit=${limit}`);
+  }
+  sites(): Promise<NginxSites> {
+    return this.req('GET', '/admin/sites');
   }
   system(): Promise<SystemInfo> {
     return this.req('GET', '/admin/system');

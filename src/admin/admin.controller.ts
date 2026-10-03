@@ -17,6 +17,7 @@ import { BlocklistService } from '../blocklist/blocklist.service';
 import { IpInfoService } from '../ipinfo/ipinfo.service';
 import { ApiError } from '../common/api-error';
 import { SystemInfoService } from './system-info.service';
+import { NginxSitesService } from './nginx-sites.service';
 import { logger } from '../common/logger';
 
 /**
@@ -37,6 +38,7 @@ export class AdminController {
     private readonly blocklist: BlocklistService,
     private readonly ipinfo: IpInfoService,
     private readonly system: SystemInfoService,
+    private readonly nginxSites: NginxSitesService,
   ) {}
 
   private key(ip: ParsedIp): string {
@@ -335,6 +337,12 @@ export class AdminController {
   @Get('system')
   async systemInfo(): Promise<unknown> {
     return this.system.info();
+  }
+
+  /** Sitios configurados en Nginx y cuáles incluyen los fragmentos de SmartGuard en su vhost. */
+  @Get('sites')
+  async sites(): Promise<unknown> {
+    return this.nginxSites.list();
   }
 
   @Get('events/page')

@@ -3,11 +3,12 @@ import { Api, ApiErr } from './api.service';
 import { I18n, Lang, TPipe } from './i18n';
 import { Tab, Ui } from './ui';
 import { ManageComponent } from './manage.component';
+import { SitesComponent } from './sites.component';
 import { AllowlistComponent, BansComponent, BlockedBotsComponent, BlockedNetworksComponent, EventsComponent, OverviewComponent } from './tables.component';
 
 @Component({
   selector: 'sg-root',
-  imports: [TPipe, ManageComponent, OverviewComponent, BansComponent, BlockedBotsComponent, BlockedNetworksComponent, AllowlistComponent, EventsComponent],
+  imports: [TPipe, ManageComponent, SitesComponent, OverviewComponent, BansComponent, BlockedBotsComponent, BlockedNetworksComponent, AllowlistComponent, EventsComponent],
   template: `
   <header>
     <div class="brand">
@@ -56,7 +57,7 @@ import { AllowlistComponent, BansComponent, BlockedBotsComponent, BlockedNetwork
     <main>
       @switch (tab()) {
         @case ('overview') { <sg-overview /> }
-        @case ('manage') { <sg-manage /> }
+        @case ('manage') { <sg-manage /> <sg-sites /> }
         @case ('blocked') { <sg-bans /> <sg-blocked-networks /> <sg-blocked-bots /> }
         @case ('allowlist') { <sg-allowlist /> }
         @case ('events') { <sg-events /> }
