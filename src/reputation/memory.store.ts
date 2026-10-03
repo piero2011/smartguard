@@ -3,6 +3,7 @@ import {
   AllowEntry,
   ApplyInput,
   ApplyResult,
+  BlockedBot,
   IpState,
   ReputationStore,
   ScoringParams,
@@ -85,6 +86,7 @@ export class MemoryReputationStore implements ReputationStore {
   private counters = new TtlMap<number>(100_000);
   private dns = new TtlMap<string>(50_000);
   private allow = new Map<string, AllowEntry>();
+  private blockedBots = new Map<string, BlockedBot>();
   private events: SecurityEvent[] = [];
   private stats = new TtlMap<Record<string, number>>(5_000);
   private tops = new TtlMap<Map<string, number>>(1_000);
@@ -244,6 +246,16 @@ export class MemoryReputationStore implements ReputationStore {
   }
   async deleteAllow(value: string): Promise<boolean> {
     return this.allow.delete(value);
+  }
+  async listBlockedBots(): Promise<BlockedBot[]> {
+    const now = this.clock();
+    return [...this.blockedBots.values()].filter((e) => !e.expiresAt || e.expiresAt > now);
+  }
+  async setBlockedBot(entry: BlockedBot): Promise<void> {
+    this.blockedBots.set(entry.pattern, entry);
+  }
+  async deleteBlockedBot(pattern: string): Promise<boolean> {
+    return this.blockedBots.delete(pattern);
   }
   async pushEvents(events: SecurityEvent[], maxLen: number): Promise<void> {
     this.events.unshift(...events.slice().reverse());

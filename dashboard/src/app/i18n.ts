@@ -175,6 +175,21 @@ const EN: Dict = {
   'ev.f.st429': '429 responses',
   'ev.f.denied': 'Stopped before PHP',
   'ov.open': 'Click to see the details',
+  'ev.blockIp': 'Block IP',
+  'ev.blockBot': 'Block bot',
+  'ev.confirmBlockIp': 'Block {ip} for 24 hours? It applies to every request from that IP, also in AUDIT mode.',
+  'ev.ipBlocked': '{ip} blocked for 24 hours.',
+  'ev.promptBot': 'Text to block in the User-Agent (the bot\'s own name). Every request whose User-Agent contains it is blocked, from any IP, also in AUDIT mode.\n\nUser-Agent of this event:\n{ua}',
+  'ev.botBlocked': 'Bot "{pattern}" blocked.',
+
+  'bb.title': 'Blocked bots',
+  'bb.hint': 'Requests whose User-Agent contains one of these texts are blocked from any IP, also in AUDIT mode. Verified search engines and allowlisted IPs are never blocked.',
+  'bb.placeholder': 'Bot name, e.g. dotbot',
+  'bb.add': 'Block bot',
+  'bb.pattern': 'Text in User-Agent',
+  'bb.note': 'Note',
+  'bb.confirmRemove': 'Unblock the bot "{pattern}"?',
+  'bb.removed': 'Bot "{pattern}" unblocked.',
 
   'inspect.title': 'Why? — {ip}',
   'inspect.close': 'Close',
@@ -195,6 +210,10 @@ const EN: Dict = {
   'err.STATIC_ENTRY': '{value} is defined in the .env file ({lists}). Edit /etc/smartguard/smartguard.env and restart SmartGuard.',
   'err.HOST_REQUIRES_DOMAIN': 'An exempt site must be a domain, *.domain or URL, not an IP.',
   'err.RELOAD_REJECTED': 'Rules reload rejected: {error}',
+  'err.INVALID_BOT_PATTERN': 'Invalid text. Use 3 to 64 characters: letters, digits, space and . _ - / : +',
+  'err.BOT_PATTERN_TOO_GENERIC': '"{pattern}" also matches real browsers or search engines and would block your visitors. Use the bot\'s own name.',
+  'err.BOT_ALREADY_BLOCKED': '"{pattern}" is already blocked by "{by}".',
+  'err.BOT_NOT_BLOCKED': '"{pattern}" is not in the blocked bots list.',
 };
 
 const ES: Dict = {
@@ -364,6 +383,21 @@ const ES: Dict = {
   'ev.f.st429': 'Respuestas 429',
   'ev.f.denied': 'Detenidas antes de PHP',
   'ov.open': 'Clic para ver el detalle',
+  'ev.blockIp': 'Bloquear IP',
+  'ev.blockBot': 'Bloquear bot',
+  'ev.confirmBlockIp': '¿Bloquear {ip} durante 24 horas? Se aplica a todas las peticiones de esa IP, también en modo AUDIT.',
+  'ev.ipBlocked': '{ip} bloqueada durante 24 horas.',
+  'ev.promptBot': 'Texto a bloquear en el User-Agent (el nombre propio del bot). Se bloquea toda petición cuyo User-Agent lo contenga, venga de la IP que venga, también en modo AUDIT.\n\nUser-Agent de este evento:\n{ua}',
+  'ev.botBlocked': 'Bot "{pattern}" bloqueado.',
+
+  'bb.title': 'Bots bloqueados',
+  'bb.hint': 'Las peticiones cuyo User-Agent contenga uno de estos textos se bloquean desde cualquier IP, también en modo AUDIT. Los buscadores verificados y las IPs de la lista blanca nunca se bloquean.',
+  'bb.placeholder': 'Nombre del bot, p. ej. dotbot',
+  'bb.add': 'Bloquear bot',
+  'bb.pattern': 'Texto en el User-Agent',
+  'bb.note': 'Nota',
+  'bb.confirmRemove': '¿Desbloquear el bot "{pattern}"?',
+  'bb.removed': 'Bot "{pattern}" desbloqueado.',
 
   'inspect.title': '¿Por qué? — {ip}',
   'inspect.close': 'Cerrar',
@@ -384,6 +418,10 @@ const ES: Dict = {
   'err.STATIC_ENTRY': '{value} está definido en el archivo .env ({lists}). Edita /etc/smartguard/smartguard.env y reinicia SmartGuard.',
   'err.HOST_REQUIRES_DOMAIN': 'Un sitio exento debe ser un dominio, *.dominio o URL, no una IP.',
   'err.RELOAD_REJECTED': 'Recarga de reglas rechazada: {error}',
+  'err.INVALID_BOT_PATTERN': 'Texto no válido. Usa de 3 a 64 caracteres: letras, números, espacio y . _ - / : +',
+  'err.BOT_PATTERN_TOO_GENERIC': '"{pattern}" también coincide con navegadores o buscadores reales y bloquearía a tus visitantes. Usa el nombre propio del bot.',
+  'err.BOT_ALREADY_BLOCKED': '"{pattern}" ya está bloqueado por "{by}".',
+  'err.BOT_NOT_BLOCKED': '"{pattern}" no está en la lista de bots bloqueados.',
 };
 
 const DICTS: Record<Lang, Dict> = { en: EN, es: ES };

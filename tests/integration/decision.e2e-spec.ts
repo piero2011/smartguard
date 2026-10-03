@@ -252,4 +252,35 @@ describe('AUDIT_MODE=true (instalación inicial)', () => {
     }
     expect(last!.headers['x-smartguard-decision']).toBe('WOULD_BLOCK');
   });
+
+  it('bloqueos manuales (bot por nombre e IP) devuelven 403 también en AUDIT', async () => {
+    const auth = { authorization: `Bearer ${TOKEN}` };
+    const admin = (method: 'GET' | 'POST' | 'DELETE', url: string, payload?: object) =>
+      app.inject({ method, url, headers: auth, payload, remoteAddress: '127.0.0.1' });
+    const decide = (ip: string, ua: string) =>
+      app.inject({ method: 'GET', url: '/internal/decision', headers: decisionHeaders(ip, '/shop/', { 'x-user-agent': ua }), remoteAddress: '127.0.0.1' });
+    const dotbot = 'Mozilla/5.0 (compatible; DotBot/1.2; +https://opensiteexplorer.org/dotbot)';
+
+    expect((await decide('198.51.100.90', dotbot)).statusCode).toBe(200);
+
+    // bot por nombre
+    expect((await admin('POST', '/admin/blocked-bots', { pattern: 'Chrome' })).json()).toMatchObject({ code: 'BOT_PATTERN_TOO_GENERIC' });
+    const add = await admin('POST', '/admin/blocked-bots', { pattern: 'DotBot', note: 'test' });
+    expect(add.statusCode).toBe(201);
+    expect(add.json()).toMatchObject({ pattern: 'dotbot', note: 'test' });
+    expect((await admin('GET', '/admin/blocked-bots')).json().items).toEqual([expect.objectContaining({ pattern: 'dotbot' })]);
+    const blocked = await decide('198.51.100.90', dotbot);
+    expect(blocked.statusCode).toBe(403);
+    expect(blocked.headers['x-smartguard-decision']).toBe('BLOCK');
+    expect((await decide('198.51.100.90', 'Mozilla/5.0 Test')).statusCode).toBe(200);
+    expect((await admin('DELETE', '/admin/blocked-bots?pattern=DotBot')).json()).toEqual({ removed: true });
+    expect((await decide('198.51.100.90', dotbot)).statusCode).toBe(200);
+    expect((await admin('DELETE', '/admin/blocked-bots?pattern=dotbot')).statusCode).toBe(404);
+
+    // IP
+    expect((await admin('POST', '/admin/ban', { ip: '198.51.100.91', duration: '1h' })).statusCode).toBe(201);
+    expect((await decide('198.51.100.91', 'Mozilla/5.0 Test')).statusCode).toBe(403);
+    expect((await admin('DELETE', '/admin/ban/198.51.100.91')).statusCode).toBe(200);
+    expect((await decide('198.51.100.91', 'Mozilla/5.0 Test')).statusCode).toBe(200);
+  });
 });

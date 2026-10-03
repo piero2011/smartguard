@@ -14,6 +14,7 @@ import { FirewallService } from '../src/firewall/firewall.service';
 import { AllowlistService } from '../src/whitelist/allowlist.service';
 import { BotVerifierService, DnsResolver } from '../src/bots/bot-verifier.service';
 import { BanService } from '../src/ban/ban.service';
+import { BlocklistService } from '../src/blocklist/blocklist.service';
 import { ScoringService } from '../src/scoring/scoring.service';
 import { LogAnalyzerService } from '../src/logs/log-analyzer.service';
 import { BuiltContext, RawRequest, buildContext } from '../src/scoring/request-context';
@@ -78,6 +79,7 @@ export interface Harness {
   bots: BotVerifierService;
   resolver: FakeResolver;
   bans: BanService;
+  blocklist: BlocklistService;
   scoring: ScoringService;
   analyzer: LogAnalyzerService;
   req(r: Partial<RawRequest> & { ip: string }): BuiltContext;
@@ -105,7 +107,8 @@ export async function makeHarness(vars: Record<string, string> = {}): Promise<Ha
   const bots = new BotVerifierService(config, reputation);
   bots.setResolver(resolver);
   const bans = new BanService(config, reputation, firewall, cloudflare, metrics, alerts, stats);
-  const scoring = new ScoringService(config, rules, reputation, bans, allowlist, bots, mode, metrics, stats);
+  const blocklist = new BlocklistService(reputation, bans);
+  const scoring = new ScoringService(config, rules, reputation, bans, allowlist, bots, mode, metrics, stats, blocklist);
   scoring.onModuleInit();
   const analyzer = new LogAnalyzerService(config, rules, scoring, cfRanges, metrics, stats);
 
@@ -126,7 +129,7 @@ export async function makeHarness(vars: Record<string, string> = {}): Promise<Ha
     return b;
   };
 
-  return { config, rules, redis, reputation, metrics, stats, mode, cfRanges, allowlist, bots, resolver, bans, scoring, analyzer, req };
+  return { config, rules, redis, reputation, metrics, stats, mode, cfRanges, allowlist, bots, resolver, bans, blocklist, scoring, analyzer, req };
 }
 
 export const NORMAL_PATHS = [

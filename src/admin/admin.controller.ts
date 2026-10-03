@@ -11,7 +11,8 @@ import { ParsedIp, ipKey, parseIp } from '../common/ip.util';
 import { formatDuration, parseDuration } from '../common/uri.util';
 import { currentMinute } from '../stats/stats.service';
 import { AllowValueParam, Infer, IpParam, ValidBody, ValidQuery } from '../common/validation';
-import { AllowBody, BanBody, ListQuery, LookupQuery, ModeBody, StatsQuery, UnbanQuery } from './admin.schemas';
+import { AllowBody, BanBody, BotBody, BotQuery, ListQuery, LookupQuery, ModeBody, StatsQuery, UnbanQuery } from './admin.schemas';
+import { BlocklistService } from '../blocklist/blocklist.service';
 import { ApiError } from '../common/api-error';
 import { logger } from '../common/logger';
 
@@ -30,6 +31,7 @@ export class AdminController {
     private readonly reputation: ReputationService,
     private readonly mode: ModeService,
     private readonly cfRanges: CloudflareRangesService,
+    private readonly blocklist: BlocklistService,
   ) {}
 
   private key(ip: ParsedIp): string {
@@ -141,17 +143,36 @@ export class AdminController {
       reasons: ['manual'],
       score: 0,
       source: 'MANUAL',
-      audit: false, // un ban manual es explícito: se aplica también en AUDIT
+      audit: false, // un ban manual es explícito: se aplica también en AUDIT (lo hace cumplir BlocklistService)
       durationSec,
       tcpIp: dto.firewall ? ip : null,
       forceCloudflare: dto.cloudflare === true,
     });
+    await this.blocklist.refresh();
     return record;
   }
 
   @Delete('ban/:ip')
   async unban(@IpParam('ip') ip: ParsedIp, @ValidQuery(UnbanQuery) q: Infer<typeof UnbanQuery>): Promise<unknown> {
-    return this.bans.unban(ip, this.key(ip), { reset: q.reset !== false });
+    const res = await this.bans.unban(ip, this.key(ip), { reset: q.reset !== false });
+    await this.blocklist.refresh();
+    return res;
+  }
+
+  /** Bots bloqueados a mano por nombre (texto del User-Agent). Se aplican también en AUDIT. */
+  @Get('blocked-bots')
+  listBlockedBots(): unknown {
+    return { items: this.blocklist.listBots() };
+  }
+
+  @Post('blocked-bots')
+  async blockBot(@ValidBody(BotBody) dto: Infer<typeof BotBody>): Promise<unknown> {
+    return this.blocklist.addBot(dto.pattern, dto.note ?? '', dto.ttl ? parseDuration(dto.ttl, 0) : undefined);
+  }
+
+  @Delete('blocked-bots')
+  async unblockBot(@ValidQuery(BotQuery) q: Infer<typeof BotQuery>): Promise<unknown> {
+    return { removed: await this.blocklist.removeBot(q.pattern) };
   }
 
   @Get('allow')
@@ -173,6 +194,7 @@ export class AdminController {
     const ip = entry.kind === 'cidr' && dto.unban !== false ? parseIp(entry.value.split('/')[0]) : null;
     const single = entry.value.endsWith('/32') || entry.value.endsWith('/128');
     const unban = ip && single ? await this.bans.unban(ip, this.key(ip)) : undefined;
+    if (unban) await this.blocklist.refresh();
     return { entry, unban };
   }
 

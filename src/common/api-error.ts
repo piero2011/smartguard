@@ -18,7 +18,11 @@ export type ApiErrorCode =
   | 'NOT_IN_ALLOWLIST'
   | 'STATIC_ENTRY'
   | 'HOST_REQUIRES_DOMAIN'
-  | 'RELOAD_REJECTED';
+  | 'RELOAD_REJECTED'
+  | 'INVALID_BOT_PATTERN'
+  | 'BOT_PATTERN_TOO_GENERIC'
+  | 'BOT_ALREADY_BLOCKED'
+  | 'BOT_NOT_BLOCKED';
 
 export class ApiError extends HttpException {
   constructor(status: number, code: ApiErrorCode, message: string, params: Record<string, unknown> = {}) {

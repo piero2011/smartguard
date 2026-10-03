@@ -9,6 +9,7 @@ import { BotVerifierService } from '../bots/bot-verifier.service';
 import { ModeService } from './mode.service';
 import { MetricsService } from '../metrics/metrics.service';
 import { StatsService } from '../stats/stats.service';
+import { BlocklistService } from '../blocklist/blocklist.service';
 import { AllowType, Confidence, DecisionAction, EventCategory, SecurityDecision, SecurityEvent, Severity } from '../common/types';
 import { ParsedIp, ipKey } from '../common/ip.util';
 import { redactQuery } from '../common/uri.util';
@@ -64,6 +65,7 @@ export class ScoringService implements OnModuleInit {
     private readonly mode: ModeService,
     private readonly metrics: MetricsService,
     private readonly stats: StatsService,
+    private readonly blocklist: BlocklistService,
   ) {}
 
   onModuleInit(): void {
@@ -153,6 +155,15 @@ export class ScoringService implements OnModuleInit {
       const basis = hostExempt ? 'allowlist:HOST' : allowType === 'VERIFIED_BOT' ? `verified-bot:${verifiedBot}` : `allowlist:${allowType}`;
       const d = this.result('ALLOW', audit, 0, 0, 0, 0, reasons, basis);
       if (signals.length) this.record(built, signals, d, meta);
+      this.count(d, meta);
+      return d;
+    }
+
+    // --- bloqueo manual desde el panel (IP o bot): decisión explícita, se aplica también en AUDIT
+    const manual = meta.source === 'decision' ? this.blocklist.match(ctx.ipKey, ctx.userAgent, now) : null;
+    if (manual) {
+      const d = this.result('BLOCK', false, 0, 0, 0, 0, [...reasons, manual.id], `manual:${manual.kind}`);
+      this.record(built, signals, d, meta);
       this.count(d, meta);
       return d;
     }

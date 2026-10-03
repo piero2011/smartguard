@@ -4,6 +4,7 @@ import {
   AllowEntry,
   ApplyInput,
   ApplyResult,
+  BlockedBot,
   IpState,
   ReputationStore,
   ScoringParams,
@@ -223,6 +224,29 @@ export class RedisReputationStore implements ReputationStore {
 
   async deleteAllow(value: string): Promise<boolean> {
     return (await this.redis.run((c) => c.hdel(this.k('allow'), value))) > 0;
+  }
+
+  async listBlockedBots(): Promise<BlockedBot[]> {
+    const h = await this.redis.run((c) => c.hgetall(this.k('blockbots')));
+    const now = Date.now();
+    const out: BlockedBot[] = [];
+    for (const v of Object.values(h)) {
+      try {
+        const e = JSON.parse(v) as BlockedBot;
+        if (typeof e.pattern === 'string' && (!e.expiresAt || e.expiresAt > now)) out.push(e);
+      } catch {
+        /* entrada corrupta: ignorar */
+      }
+    }
+    return out;
+  }
+
+  async setBlockedBot(entry: BlockedBot): Promise<void> {
+    await this.redis.run((c) => c.hset(this.k('blockbots'), entry.pattern, JSON.stringify(entry)));
+  }
+
+  async deleteBlockedBot(pattern: string): Promise<boolean> {
+    return (await this.redis.run((c) => c.hdel(this.k('blockbots'), pattern))) > 0;
   }
 
   async pushEvents(events: SecurityEvent[], maxLen: number): Promise<void> {

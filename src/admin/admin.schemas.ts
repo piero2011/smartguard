@@ -32,6 +32,17 @@ export const AllowBody = {
   unban: field.optional(field.boolean()),
 };
 
+export const BotBody = {
+  /** texto que se busca en el User-Agent (sin distinguir mayúsculas), p. ej. "dotbot" */
+  pattern: field.string({ min: 3, max: 64 }),
+  note: field.optional(field.string({ max: 200 })),
+  ttl: field.optional(field.duration()),
+};
+
+export const BotQuery = {
+  pattern: field.string({ min: 3, max: 64 }),
+};
+
 export const LookupQuery = {
   /** IP, CIDR, dominio, *.dominio o URL */
   value: field.allowValue(),

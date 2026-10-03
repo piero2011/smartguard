@@ -98,6 +98,14 @@ export interface SecurityEvent {
   userAgent?: string;
 }
 
+/** Bot bloqueado a mano: texto que se busca en el User-Agent */
+export interface BlockedBot {
+  pattern: string;
+  note: string;
+  createdAt: number;
+  expiresAt?: number;
+}
+
 export interface Explanation {
   explanation: string;
   ban: BanRecord | null;
@@ -222,5 +230,14 @@ export class Api {
   }
   unban(ip: string, keepScore: boolean): Promise<{ removed: boolean; fingerprintBans: number; reset: boolean }> {
     return this.req('DELETE', `/admin/ban/${encodeURIComponent(ip)}${keepScore ? '?reset=false' : ''}`);
+  }
+  blockedBots(): Promise<{ items: BlockedBot[] }> {
+    return this.req('GET', '/admin/blocked-bots');
+  }
+  blockBot(body: { pattern: string; note?: string }): Promise<BlockedBot> {
+    return this.req('POST', '/admin/blocked-bots', body);
+  }
+  unblockBot(pattern: string): Promise<{ removed: boolean }> {
+    return this.req('DELETE', `/admin/blocked-bots?pattern=${encodeURIComponent(pattern)}`);
   }
 }

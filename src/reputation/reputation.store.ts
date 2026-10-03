@@ -63,6 +63,14 @@ export interface AllowEntry {
   expiresAt?: number;
 }
 
+/** Bot bloqueado a mano desde el panel/API: texto (en minúsculas) que se busca en el User-Agent. */
+export interface BlockedBot {
+  pattern: string;
+  note: string;
+  createdAt: number;
+  expiresAt?: number;
+}
+
 export interface StatsBucket {
   minute: number;
   fields: Record<string, number>;
@@ -97,6 +105,10 @@ export interface ReputationStore {
   listAllow(): Promise<AllowEntry[]>;
   setAllow(entry: AllowEntry): Promise<void>;
   deleteAllow(value: string): Promise<boolean>;
+
+  listBlockedBots(): Promise<BlockedBot[]>;
+  setBlockedBot(entry: BlockedBot): Promise<void>;
+  deleteBlockedBot(pattern: string): Promise<boolean>;
 
   pushEvents(events: SecurityEvent[], maxLen: number): Promise<void>;
   listEvents(limit: number): Promise<SecurityEvent[]>;

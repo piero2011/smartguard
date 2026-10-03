@@ -360,6 +360,9 @@ sudo smartguard status | ip <IP> | ban <IP> [1h] [motivo] | unban <IP> | allow <
 | GET | `/admin/allow` (estática, dinámica, dominios resueltos) | token |
 | POST | `/admin/allow` `{value, type?, target?: client|host, note?, ttl?, unban?}` | token |
 | DELETE | `/admin/allow/:value` | token |
+| GET | `/admin/blocked-bots` (bots bloqueados por nombre) | token |
+| POST | `/admin/blocked-bots` `{pattern, note?, ttl?}` — texto a buscar en el User-Agent | token |
+| DELETE | `/admin/blocked-bots?pattern=` | token |
 | GET | `/admin/stats?minutes=` · `/admin/events?limit=` · `/admin/rules` | token |
 | POST | `/admin/rules/reload` | token |
 | GET/POST | `/admin/mode` `{audit}` | token |
@@ -392,6 +395,12 @@ sudo smartguard status | ip <IP> | ban <IP> [1h] [motivo] | unban <IP> | allow <
   - *Allow a site or subdomain*: dominio, `*.dominio` o URL (`https://api.ejemplo.com/ruta` → `api.ejemplo.com`).
   - *Block an IP* (15 min … 1 año) y *Unblock an IP* (con opción de conservar el score).
   - Si el valor ya estaba, se muestra el aviso con la lista (el backend lo valida también: 409).
+- En **Events**, cada fila tiene *Block IP* (24 h) y *Block bot* (por nombre: propone el nombre propio
+  del bot a partir del User-Agent). La lista de bots bloqueados se gestiona en **Blocked**.
+- **Los bloqueos manuales (IP o bot) se aplican siempre, también en AUDIT**: AUDIT solo deja en
+  suspenso lo que SmartGuard decide por su cuenta. Nunca bloquean IPs de la lista blanca ni buscadores
+  verificados, y se rechazan los textos que también cubren navegadores reales (`chrome`, `mozilla`…).
+  Actúan sobre lo que va a PHP (auth_request); los archivos estáticos no pasan por SmartGuard.
 - Seguridad: solo loopback, token en `sessionStorage`, CSP `script-src 'self'` y estilos con nonce
   por petición, sin inline scripts.
 
