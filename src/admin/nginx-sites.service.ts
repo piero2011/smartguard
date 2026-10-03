@@ -70,7 +70,7 @@ export class NginxSitesService {
   constructor(private readonly allowlist: AllowlistService) {}
 
   async list(dirs: string[][] = SITE_DIRS): Promise<{ readable: boolean; dirs: string[]; items: NginxSite[] }> {
-    if (this.cache && Date.now() - this.cache.at < TTL_MS && dirs === SITE_DIRS) return this.cache.value;
+    if (this.cache && Date.now() - this.cache.at < TTL_MS && dirs === SITE_DIRS) return this.withExempt(this.cache.value);
     const items: NginxSite[] = [];
     let found = 0;
     let unreadable = 0;
@@ -109,7 +109,7 @@ export class NginxSitesService {
           file,
           ...v,
           status: v.rules && v.decision ? 'full' : v.rules || v.decision ? 'partial' : 'none',
-          exempt: v.names.every((n) => this.allowlist.hostAllowed(n)),
+          exempt: false,
         });
       }
     }
@@ -120,6 +120,14 @@ export class NginxSitesService {
     const readable = found === 0 ? denied.length === 0 : unreadable < found;
     const value = { readable, dirs: readable ? dirs.flat() : denied.length ? denied : dirs.flat(), items };
     if (dirs === SITE_DIRS) this.cache = { at: Date.now(), value };
-    return value;
+    return this.withExempt(value);
+  }
+
+  /**
+   * "Exento" se calcula en cada consulta y no se guarda con la lectura de los vhosts: la lista
+   * blanca cambia desde el panel y, tras un reinicio, puede tardar unos segundos en cargarse.
+   */
+  private withExempt<T extends { items: NginxSite[] }>(value: T): T {
+    return { ...value, items: value.items.map((s) => ({ ...s, exempt: s.names.every((n) => this.allowlist.hostAllowed(n)) })) };
   }
 }
