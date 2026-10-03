@@ -106,6 +106,17 @@ export interface BlockedBot {
   expiresAt?: number;
 }
 
+/** Red completa (ASN) bloqueada a mano */
+export interface BlockedNetwork {
+  asn: number;
+  org: string;
+  country: string;
+  prefixCount: number;
+  note: string;
+  createdAt: number;
+  fetchedAt: number;
+}
+
 /** A quién pertenece una IP (red, organización, país de registro de la red) */
 export interface IpInfo {
   asn: number | null;
@@ -254,6 +265,15 @@ export class Api {
   }
   ipInfo(ips: string[]): Promise<{ items: Record<string, IpInfo | null> }> {
     return this.req('GET', `/admin/ipinfo?ips=${encodeURIComponent(ips.join(','))}`);
+  }
+  blockedNetworks(): Promise<{ items: BlockedNetwork[] }> {
+    return this.req('GET', '/admin/blocked-networks');
+  }
+  blockNetwork(body: { ip?: string; asn?: number; note?: string }): Promise<BlockedNetwork> {
+    return this.req('POST', '/admin/blocked-networks', body);
+  }
+  unblockNetwork(asn: number): Promise<{ removed: boolean }> {
+    return this.req('DELETE', `/admin/blocked-networks?asn=${asn}`);
   }
   blockedBots(): Promise<{ items: BlockedBot[] }> {
     return this.req('GET', '/admin/blocked-bots');

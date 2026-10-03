@@ -5,6 +5,7 @@ import {
   ApplyInput,
   ApplyResult,
   BlockedBot,
+  BlockedNetwork,
   IpState,
   ReputationStore,
   ScoringParams,
@@ -250,6 +251,28 @@ export class RedisReputationStore implements ReputationStore {
 
   async deleteBlockedBot(pattern: string): Promise<boolean> {
     return (await this.redis.run((c) => c.hdel(this.k('blockbots'), pattern))) > 0;
+  }
+
+  async listBlockedNetworks(): Promise<BlockedNetwork[]> {
+    const h = await this.redis.run((c) => c.hgetall(this.k('blocknets')));
+    const out: BlockedNetwork[] = [];
+    for (const v of Object.values(h)) {
+      try {
+        const e = JSON.parse(v) as BlockedNetwork;
+        if (Number.isInteger(e.asn) && Array.isArray(e.prefixes)) out.push(e);
+      } catch {
+        /* entrada corrupta: ignorar */
+      }
+    }
+    return out;
+  }
+
+  async setBlockedNetwork(entry: BlockedNetwork): Promise<void> {
+    await this.redis.run((c) => c.hset(this.k('blocknets'), String(entry.asn), JSON.stringify(entry)));
+  }
+
+  async deleteBlockedNetwork(asn: number): Promise<boolean> {
+    return (await this.redis.run((c) => c.hdel(this.k('blocknets'), String(asn)))) > 0;
   }
 
   async pushEvents(events: SecurityEvent[], maxLen: number): Promise<void> {

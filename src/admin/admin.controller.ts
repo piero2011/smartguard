@@ -12,7 +12,7 @@ import { ParsedIp, ipKey, parseIp } from '../common/ip.util';
 import { formatDuration, parseDuration } from '../common/uri.util';
 import { currentMinute } from '../stats/stats.service';
 import { AllowValueParam, Infer, IpParam, ValidBody, ValidQuery } from '../common/validation';
-import { AllowBody, BanBody, BotBody, BotQuery, IpInfoQuery, ListQuery, LookupQuery, ModeBody, StatsQuery, UnbanQuery } from './admin.schemas';
+import { AllowBody, BanBody, BotBody, BotQuery, IpInfoQuery, ListQuery, LookupQuery, ModeBody, NetworkBody, NetworkQuery, StatsQuery, UnbanQuery } from './admin.schemas';
 import { BlocklistService } from '../blocklist/blocklist.service';
 import { IpInfoService } from '../ipinfo/ipinfo.service';
 import { ApiError } from '../common/api-error';
@@ -245,6 +245,23 @@ export class AdminController {
       fingerprintBans,
       score,
     };
+  }
+
+  /** Redes completas (ASN) bloqueadas a mano: todos los rangos del proveedor. Se aplican también en AUDIT. */
+  @Get('blocked-networks')
+  listBlockedNetworks(): unknown {
+    return { items: this.blocklist.listNetworks() };
+  }
+
+  @Post('blocked-networks')
+  async blockNetwork(@ValidBody(NetworkBody) dto: Infer<typeof NetworkBody>): Promise<unknown> {
+    if (!dto.ip && !dto.asn) throw new ApiError(400, 'VALIDATION', 'ip or asn: required', { field: 'ip', reason: 'required' });
+    return this.blocklist.addNetwork({ ip: dto.ip, asn: dto.asn }, dto.note ?? '');
+  }
+
+  @Delete('blocked-networks')
+  async unblockNetwork(@ValidQuery(NetworkQuery) q: Infer<typeof NetworkQuery>): Promise<unknown> {
+    return { removed: await this.blocklist.removeNetwork(q.asn) };
   }
 
   /** A quién pertenece cada IP (red/ASN, organización, país de registro, ¿hosting?). Para el panel. */

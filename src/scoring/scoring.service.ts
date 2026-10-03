@@ -159,8 +159,8 @@ export class ScoringService implements OnModuleInit {
       return d;
     }
 
-    // --- bloqueo manual desde el panel (IP o bot): decisión explícita, se aplica también en AUDIT
-    const manual = meta.source === 'decision' ? this.blocklist.match(ctx.ipKey, ctx.userAgent, now) : null;
+    // --- bloqueo manual desde el panel (IP, bot o red): decisión explícita, se aplica también en AUDIT
+    const manual = meta.source === 'decision' ? this.blocklist.match(ctx.ipKey, ctx.userAgent, now, ip) : null;
     if (manual) {
       const d = this.result('BLOCK', false, 0, 0, 0, 0, [...reasons, manual.id], `manual:${manual.kind}`);
       this.record(built, signals, d, meta);

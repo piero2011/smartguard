@@ -361,6 +361,9 @@ sudo smartguard status | ip <IP> | ban <IP> [1h] [motivo] | unban <IP> | allow <
 | POST | `/admin/allow` `{value, type?, target?: client|host, note?, ttl?, unban?}` | token |
 | DELETE | `/admin/allow/:value` | token |
 | GET | `/admin/ipinfo?ips=a,b,c` (hasta 50) → red/ASN, organización, país de registro, ¿hosting? | token |
+| GET | `/admin/blocked-networks` (redes completas bloqueadas) | token |
+| POST | `/admin/blocked-networks` `{ip? | asn?, note?}` — bloquea todos los rangos del ASN | token |
+| DELETE | `/admin/blocked-networks?asn=` | token |
 | GET | `/admin/blocked-bots` (bots bloqueados por nombre) | token |
 | POST | `/admin/blocked-bots` `{pattern, note?, ttl?}` — texto a buscar en el User-Agent | token |
 | DELETE | `/admin/blocked-bots?pattern=` | token |
@@ -398,7 +401,12 @@ sudo smartguard status | ip <IP> | ban <IP> [1h] [motivo] | unban <IP> | allow <
   - Si el valor ya estaba, se muestra el aviso con la lista (el backend lo valida también: 409).
 - En **Events**, cada fila tiene *Block IP* (24 h) y *Block bot* (por nombre: propone el nombre propio
   del bot a partir del User-Agent). La lista de bots bloqueados se gestiona en **Blocked**.
-- **Los bloqueos manuales (IP o bot) se aplican siempre, también en AUDIT**: AUDIT solo deja en
+- *Block network* (en Events y Overview) bloquea **la red entera** de esa IP: todos los rangos que anuncia
+  su ASN (p. ej. los ~900 de DigitalOcean), descargados de RIPEstat y refrescados cada día. La pertenencia
+  se comprueba en memoria por búsqueda binaria, sin I/O en la decisión. Cloudflare no se puede bloquear.
+  Pensado para proveedores de hosting; en una operadora de internet bloquearía a clientes reales.
+- Los bloqueos manuales de IP, bot y red **no caducan**: duran hasta que se desbloquean en **Blocked**.
+- **Los bloqueos manuales (IP, bot o red) se aplican siempre, también en AUDIT**: AUDIT solo deja en
   suspenso lo que SmartGuard decide por su cuenta. Nunca bloquean IPs de la lista blanca ni buscadores
   verificados, y se rechazan los textos que también cubren navegadores reales (`chrome`, `mozilla`…).
   Actúan sobre lo que va a PHP (auth_request); los archivos estáticos no pasan por SmartGuard.

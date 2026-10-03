@@ -1,8 +1,8 @@
 import { Component, computed, effect, inject, signal } from '@angular/core';
-import { AllowList, Api, ApiErr, BanRecord, BlockedBot, SecurityEvent, Stats, isPermanent } from './api.service';
+import { AllowList, Api, ApiErr, BanRecord, BlockedBot, BlockedNetwork, SecurityEvent, Stats, isPermanent } from './api.service';
 import { I18n, TPipe } from './i18n';
 import { BlockActions, EventFilter, Ui } from './ui';
-import { IpComponent } from './ipinfo';
+import { IpComponent, IpInfoStore } from './ipinfo';
 
 /** Resumen: tarjetas + top rutas / IPs / reglas */
 @Component({
@@ -28,7 +28,10 @@ import { IpComponent } from './ipinfo';
           @for (r of s.topIps; track r.member) {
             <tr><td class="ip"><sg-ip [ip]="r.member" /></td><td class="num">{{ r.score }}</td>
               <td class="actions"><button class="small" (click)="inspect(r.member)">{{ 'common.inspect' | t }}</button>
-                <button class="small danger" (click)="actions.blockIp(r.member)">{{ 'ev.blockIp' | t }}</button></td></tr>
+                <button class="small danger" (click)="actions.blockIp(r.member)">{{ 'ev.blockIp' | t }}</button>
+                @if (ipinfo.network(r.member); as n) {
+                  <button class="small danger" [title]="n.org" (click)="actions.blockNetwork(r.member, n.org)">{{ 'net.block' | t }}</button>
+                }</td></tr>
           } @empty { <tr><td colspan="3" class="muted">{{ 'common.none' | t }}</td></tr> }
         </table></section>
       <section class="card"><h2>{{ 'ov.topRules' | t }}</h2>
@@ -46,6 +49,7 @@ export class OverviewComponent {
   private readonly api = inject(Api);
   readonly ui = inject(Ui);
   readonly actions = inject(BlockActions);
+  readonly ipinfo = inject(IpInfoStore);
   readonly stats = signal<Stats | null>(null);
 
   constructor() {
@@ -278,6 +282,59 @@ export function suggestBotPattern(userAgent: string): string {
   return product && !BROWSER_TOKENS.has(product[1]!.toLowerCase()) ? product[1]! : '';
 }
 
+/** Redes completas (ASN) bloqueadas: lista y baja. Se bloquean desde una fila de Eventos o del Resumen. */
+@Component({
+  selector: 'sg-blocked-networks',
+  imports: [TPipe],
+  template: `
+  <section class="card">
+    <h2>{{ 'net.title' | t }} ({{ items().length }})</h2>
+    <p class="muted">{{ 'net.hint' | t }}</p>
+    <div class="scroll"><table>
+      <tr><th>{{ 'net.org' | t }}</th><th>ASN</th><th>{{ 'ev.country' | t }}</th><th class="num">{{ 'net.ranges' | t }}</th>
+        <th>{{ 'bl.created' | t }}</th><th>{{ 'net.updated' | t }}</th><th></th></tr>
+      @for (n of items(); track n.asn) {
+        <tr><td>{{ n.org }}</td><td><code>AS{{ n.asn }}</code></td><td>{{ n.country }}</td><td class="num">{{ n.prefixCount }}</td>
+          <td>{{ i18n.date(n.createdAt) }}</td><td>{{ i18n.date(n.fetchedAt) }}</td>
+          <td class="actions"><button class="small primary" (click)="remove(n)">{{ 'common.unblock' | t }}</button></td></tr>
+      } @empty { <tr><td colspan="7" class="muted">{{ 'common.none' | t }}</td></tr> }
+    </table></div>
+  </section>
+  `,
+})
+export class BlockedNetworksComponent {
+  private readonly api = inject(Api);
+  private readonly ui = inject(Ui);
+  readonly i18n = inject(I18n);
+  readonly items = signal<BlockedNetwork[]>([]);
+
+  constructor() {
+    effect(() => {
+      this.ui.changed();
+      void this.load();
+    });
+  }
+
+  async load(): Promise<void> {
+    try {
+      this.items.set((await this.api.blockedNetworks()).items);
+    } catch (e) {
+      this.ui.notify('error', () => this.api.describe(e as ApiErr));
+    }
+  }
+
+  async remove(n: BlockedNetwork): Promise<void> {
+    if (!confirm(this.i18n.t('net.confirmRemove', { org: n.org }))) return;
+    try {
+      await this.api.unblockNetwork(n.asn);
+      this.ui.notify('ok', () => this.i18n.t('net.removed', { org: n.org }));
+      this.ui.bump();
+    } catch (e) {
+      this.ui.notify('error', () => this.api.describe(e as ApiErr));
+    }
+  }
+}
+
 /** Bots bloqueados por nombre (texto del User-Agent): lista, alta y baja */
 @Component({
   selector: 'sg-blocked-bots',
@@ -393,6 +450,9 @@ const EVENT_FILTERS: Record<EventFilter, (e: SecurityEvent) => boolean> = {
             <button class="small" (click)="inspect(e.ip)">{{ 'common.inspect' | t }}</button>
             <button class="small danger" (click)="blockIp(e)">{{ 'ev.blockIp' | t }}</button>
             @if (e.userAgent) { <button class="small danger" (click)="blockBot(e)">{{ 'ev.blockBot' | t }}</button> }
+            @if (ipinfo.network(e.ip); as n) {
+              <button class="small danger" [title]="n.org" (click)="actions.blockNetwork(e.ip, n.org)">{{ 'net.block' | t }}</button>
+            }
           </td></tr>
       } @empty { <tr><td colspan="10" class="muted">{{ 'common.none' | t }}</td></tr> }
     </table></div>
@@ -404,7 +464,8 @@ export class EventsComponent {
   readonly ui = inject(Ui);
   readonly i18n = inject(I18n);
   readonly events = signal<SecurityEvent[]>([]);
-  private readonly actions = inject(BlockActions);
+  readonly actions = inject(BlockActions);
+  readonly ipinfo = inject(IpInfoStore);
   readonly filters: EventFilter[] = ['all', 'log', 'suspicious', 'wouldBlock', 'blocked', 'limited', 'st403', 'st429', 'denied'];
 
   /** Eventos que pasan el filtro elegido y el texto buscado (IP, ruta, motivo, host o User-Agent). */

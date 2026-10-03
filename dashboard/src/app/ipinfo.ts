@@ -31,6 +31,12 @@ export class IpInfoStore {
     return this.map()[address(ip)] ?? null;
   }
 
+  /** La red de la IP si se conoce y se puede bloquear entera (nunca Cloudflare: es el proxy de todos). */
+  network(ip: string): IpInfo | null {
+    const i = this.get(ip);
+    return i && i.asn && !i.cloudflare ? i : null;
+  }
+
   private async flush(): Promise<void> {
     this.timer = null;
     const all = this.queue;

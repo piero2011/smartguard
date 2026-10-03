@@ -4,6 +4,8 @@ import { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { AppModule } from '../../src/app.module';
 import { ConfigService } from '../../src/config/config.service';
 import { configureApp, createAdapter } from '../../src/main';
+import { BlocklistService } from '../../src/blocklist/blocklist.service';
+import { IpInfoService } from '../../src/ipinfo/ipinfo.service';
 import { testEnv } from '../helpers';
 
 const SECRET = 'test-decision-secret-0123456789';
@@ -262,6 +264,33 @@ describe('AUDIT_MODE=true (instalación inicial)', () => {
     expect((await get('no-es-ip')).statusCode).toBe(400);
     expect((await get(Array.from({ length: 51 }, (_, i) => `10.0.0.${i}`).join(','))).statusCode).toBe(400);
     expect((await app.inject({ method: 'GET', url: '/admin/ipinfo?ips=10.0.0.1', remoteAddress: '127.0.0.1' })).statusCode).toBe(401);
+  });
+
+  it('red completa (ASN): API de alta/listado/baja y 403 para sus IPs también en AUDIT', async () => {
+    app.get(BlocklistService).setPrefixFetcher(async () => ['203.0.113.0/24', '2001:db8:100::/40']);
+    app.get(IpInfoService).setResolver({ resolveTxt: async () => Promise.reject(new Error('sin DNS')) });
+    const auth = { authorization: `Bearer ${TOKEN}` };
+    const admin = (method: 'GET' | 'POST' | 'DELETE', url: string, payload?: object) =>
+      app.inject({ method, url, headers: auth, payload, remoteAddress: '127.0.0.1' });
+    const decide = (ip: string) =>
+      app.inject({ method: 'GET', url: '/internal/decision', headers: decisionHeaders(ip, '/shop/'), remoteAddress: '127.0.0.1' });
+
+    expect((await admin('POST', '/admin/blocked-networks', {})).statusCode).toBe(400);
+    expect((await admin('POST', '/admin/blocked-networks', { asn: 13335 })).json()).toMatchObject({ code: 'NETWORK_PROTECTED' });
+    const add = await admin('POST', '/admin/blocked-networks', { asn: 64500, note: 'test' });
+    expect(add.statusCode).toBe(201);
+    expect(add.json()).toMatchObject({ asn: 64500, prefixCount: 2, note: 'test' });
+    expect((await admin('GET', '/admin/blocked-networks')).json().items).toEqual([expect.objectContaining({ asn: 64500, prefixCount: 2 })]);
+
+    const blocked = await decide('203.0.113.77');
+    expect(blocked.statusCode).toBe(403);
+    expect(blocked.headers['x-smartguard-decision']).toBe('BLOCK');
+    expect((await decide('2001:db8:1aa::9')).statusCode).toBe(403);
+    expect((await decide('198.51.100.77')).statusCode).toBe(200);
+
+    expect((await admin('DELETE', '/admin/blocked-networks?asn=64500')).json()).toEqual({ removed: true });
+    expect((await decide('203.0.113.77')).statusCode).toBe(200);
+    expect((await admin('DELETE', '/admin/blocked-networks?asn=64500')).statusCode).toBe(404);
   });
 
   it('bloqueos manuales (bot por nombre e IP) devuelven 403 también en AUDIT', async () => {

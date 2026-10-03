@@ -107,7 +107,8 @@ export class IpInfoService {
     }
   }
 
-  private async asnName(asn: number): Promise<string> {
+  /** Nombre de la organización de un ASN ('' si no se pudo resolver). */
+  async asnName(asn: number): Promise<string> {
     const key = String(asn);
     const cached = this.asnNames.get(key);
     if (cached !== undefined) return cached;

@@ -15,6 +15,7 @@ import { AllowlistService } from '../src/whitelist/allowlist.service';
 import { BotVerifierService, DnsResolver } from '../src/bots/bot-verifier.service';
 import { BanService } from '../src/ban/ban.service';
 import { BlocklistService } from '../src/blocklist/blocklist.service';
+import { IpInfoService } from '../src/ipinfo/ipinfo.service';
 import { ScoringService } from '../src/scoring/scoring.service';
 import { LogAnalyzerService } from '../src/logs/log-analyzer.service';
 import { BuiltContext, RawRequest, buildContext } from '../src/scoring/request-context';
@@ -107,7 +108,11 @@ export async function makeHarness(vars: Record<string, string> = {}): Promise<Ha
   const bots = new BotVerifierService(config, reputation);
   bots.setResolver(resolver);
   const bans = new BanService(config, reputation, firewall, cloudflare, metrics, alerts, stats);
-  const blocklist = new BlocklistService(reputation, bans);
+  // Sin red en los tests: DNS (nombre del ASN) y descarga de rangos se sustituyen por dobles
+  const ipinfo = new IpInfoService(config, cfRanges);
+  ipinfo.setResolver({ resolveTxt: async () => Promise.reject(new Error('sin DNS en tests')) });
+  const blocklist = new BlocklistService(reputation, bans, ipinfo);
+  blocklist.setPrefixFetcher(async () => Promise.reject(new Error('sin red en tests')));
   const scoring = new ScoringService(config, rules, reputation, bans, allowlist, bots, mode, metrics, stats, blocklist);
   scoring.onModuleInit();
   const analyzer = new LogAnalyzerService(config, rules, scoring, cfRanges, metrics, stats);

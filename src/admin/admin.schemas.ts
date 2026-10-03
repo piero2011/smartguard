@@ -43,6 +43,18 @@ export const BotQuery = {
   pattern: field.string({ min: 3, max: 64 }),
 };
 
+export const NetworkBody = {
+  /** IP cuya red completa se bloquea (se averigua su ASN)… */
+  ip: field.optional(field.ip()),
+  /** …o el número de ASN directamente */
+  asn: field.optional(field.int({ min: 1, max: 4_294_967_295 })),
+  note: field.optional(field.string({ max: 200 })),
+};
+
+export const NetworkQuery = {
+  asn: field.int({ min: 1, max: 4_294_967_295 }),
+};
+
 export const IpInfoQuery = {
   /** hasta 50 IPs separadas por comas */
   ips: field.string({ max: 2500, pattern: /^[0-9a-fA-F:.]{2,45}(,[0-9a-fA-F:.]{2,45}){0,49}$/, message: 'up to 50 comma-separated IP addresses' }),

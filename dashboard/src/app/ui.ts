@@ -80,4 +80,20 @@ export class BlockActions {
       this.ui.notify('error', () => this.api.describe(err as ApiErr));
     }
   }
+
+  /**
+   * Bloquea la red entera (ASN) a la que pertenece una IP: todos los rangos de ese proveedor,
+   * hasta que se desbloquee a mano. `org` es solo para el texto de confirmación.
+   */
+  async blockNetwork(ipOrKey: string, org: string): Promise<void> {
+    const ip = ipOrKey.split('/')[0] ?? ipOrKey;
+    if (!confirm(this.i18n.t('net.confirmBlock', { org: org || ip }))) return;
+    try {
+      const n = await this.api.blockNetwork({ ip });
+      this.ui.notify('ok', () => this.i18n.t('net.blocked', { org: n.org, asn: n.asn, count: n.prefixCount }));
+      this.ui.bump();
+    } catch (err) {
+      this.ui.notify('error', () => this.api.describe(err as ApiErr));
+    }
+  }
 }

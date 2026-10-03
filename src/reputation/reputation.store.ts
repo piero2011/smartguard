@@ -71,6 +71,19 @@ export interface BlockedBot {
   expiresAt?: number;
 }
 
+/** Red completa (ASN) bloqueada a mano: todos los rangos que anuncia, p. ej. un proveedor de hosting. */
+export interface BlockedNetwork {
+  asn: number;
+  org: string;
+  country: string;
+  /** CIDRs anunciados por la red (IPv4 e IPv6), ya validados */
+  prefixes: string[];
+  note: string;
+  createdAt: number;
+  /** última vez que se descargó la lista de rangos */
+  fetchedAt: number;
+}
+
 export interface StatsBucket {
   minute: number;
   fields: Record<string, number>;
@@ -109,6 +122,10 @@ export interface ReputationStore {
   listBlockedBots(): Promise<BlockedBot[]>;
   setBlockedBot(entry: BlockedBot): Promise<void>;
   deleteBlockedBot(pattern: string): Promise<boolean>;
+
+  listBlockedNetworks(): Promise<BlockedNetwork[]>;
+  setBlockedNetwork(entry: BlockedNetwork): Promise<void>;
+  deleteBlockedNetwork(asn: number): Promise<boolean>;
 
   pushEvents(events: SecurityEvent[], maxLen: number): Promise<void>;
   listEvents(limit: number): Promise<SecurityEvent[]>;

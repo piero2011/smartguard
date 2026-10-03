@@ -187,6 +187,16 @@ const EN: Dict = {
 
   'ip.hosting': 'data center',
 
+  'net.block': 'Block network',
+  'net.confirmBlock': 'Block the WHOLE network {org}? Every IP of that provider is blocked until you unblock it, also in AUDIT mode. Allowlisted IPs keep working. Do it only for hosting networks: on an Internet provider it would block real customers.',
+  'net.blocked': 'Network {org} (AS{asn}) blocked: {count} ranges.',
+  'net.title': 'Blocked networks',
+  'net.hint': 'Every IP of these providers is blocked, also in AUDIT mode, until you unblock the network. Their ranges are refreshed daily. Allowlisted IPs and verified search engines are never blocked.',
+  'net.org': 'Network',
+  'net.ranges': 'Ranges',
+  'net.updated': 'Ranges updated',
+  'net.confirmRemove': 'Unblock the network {org}?',
+  'net.removed': 'Network {org} unblocked.',
   'bb.title': 'Blocked bots',
   'bb.hint': 'Requests whose User-Agent contains one of these texts are blocked from any IP, also in AUDIT mode. Verified search engines and allowlisted IPs are never blocked.',
   'bb.placeholder': 'Bot name, e.g. dotbot',
@@ -219,6 +229,11 @@ const EN: Dict = {
   'err.BOT_PATTERN_TOO_GENERIC': '"{pattern}" also matches real browsers or search engines and would block your visitors. Use the bot\'s own name.',
   'err.BOT_ALREADY_BLOCKED': '"{pattern}" is already blocked by "{by}".',
   'err.BOT_NOT_BLOCKED': '"{pattern}" is not in the blocked bots list.',
+  'err.NETWORK_UNKNOWN': 'Could not find which network that IP belongs to.',
+  'err.NETWORK_PROTECTED': '{org} is Cloudflare: all your visitors arrive through it, so it cannot be blocked.',
+  'err.NETWORK_ALREADY_BLOCKED': 'That network (AS{asn}) is already blocked.',
+  'err.NETWORK_FETCH_FAILED': 'Could not download the ranges of that network (AS{asn}). Try again in a minute.',
+  'err.NETWORK_NOT_BLOCKED': 'That network is not in the blocked list.',
 };
 
 const ES: Dict = {
@@ -400,6 +415,16 @@ const ES: Dict = {
 
   'ip.hosting': 'centro de datos',
 
+  'net.block': 'Bloquear red',
+  'net.confirmBlock': '¿Bloquear TODA la red {org}? Se bloquean todas las IPs de ese proveedor hasta que la desbloquees, también en modo AUDIT. Las IPs de la lista blanca siguen funcionando. Hazlo solo con redes de hosting: en una operadora de internet bloquearías a clientes reales.',
+  'net.blocked': 'Red {org} (AS{asn}) bloqueada: {count} rangos.',
+  'net.title': 'Redes bloqueadas',
+  'net.hint': 'Se bloquean todas las IPs de estos proveedores, también en modo AUDIT, hasta que desbloquees la red. Sus rangos se actualizan cada día. Las IPs de la lista blanca y los buscadores verificados nunca se bloquean.',
+  'net.org': 'Red',
+  'net.ranges': 'Rangos',
+  'net.updated': 'Rangos actualizados',
+  'net.confirmRemove': '¿Desbloquear la red {org}?',
+  'net.removed': 'Red {org} desbloqueada.',
   'bb.title': 'Bots bloqueados',
   'bb.hint': 'Las peticiones cuyo User-Agent contenga uno de estos textos se bloquean desde cualquier IP, también en modo AUDIT. Los buscadores verificados y las IPs de la lista blanca nunca se bloquean.',
   'bb.placeholder': 'Nombre del bot, p. ej. dotbot',
@@ -432,6 +457,11 @@ const ES: Dict = {
   'err.BOT_PATTERN_TOO_GENERIC': '"{pattern}" también coincide con navegadores o buscadores reales y bloquearía a tus visitantes. Usa el nombre propio del bot.',
   'err.BOT_ALREADY_BLOCKED': '"{pattern}" ya está bloqueado por "{by}".',
   'err.BOT_NOT_BLOCKED': '"{pattern}" no está en la lista de bots bloqueados.',
+  'err.NETWORK_UNKNOWN': 'No se pudo averiguar a qué red pertenece esa IP.',
+  'err.NETWORK_PROTECTED': '{org} es Cloudflare: todos tus visitantes llegan a través de ella, así que no se puede bloquear.',
+  'err.NETWORK_ALREADY_BLOCKED': 'Esa red (AS{asn}) ya está bloqueada.',
+  'err.NETWORK_FETCH_FAILED': 'No se pudieron descargar los rangos de esa red (AS{asn}). Inténtalo de nuevo en un minuto.',
+  'err.NETWORK_NOT_BLOCKED': 'Esa red no está en la lista de bloqueadas.',
 };
 
 const DICTS: Record<Lang, Dict> = { en: EN, es: ES };
