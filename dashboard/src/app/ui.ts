@@ -33,7 +33,7 @@ export type EventFilter = 'all' | 'log' | 'suspicious' | 'wouldBlock' | 'blocked
 /** Avisos (toasts) + "tick" de refresco + navegación compartidos entre pestañas. */
 @Injectable({ providedIn: 'root' })
 export class Ui {
-  readonly tab = signal<Tab>('manage');
+  readonly tab = signal<Tab>('overview');
   /** Sitio elegido en la cabecera para Resumen y Eventos ('' = todos los protegidos) */
   readonly site = signal('');
   /** Sitios que ofrece el selector: los protegidos según Nginx más los que tienen datos */
