@@ -155,7 +155,7 @@ export class ScoringService implements OnModuleInit {
       const basis = hostExempt ? 'allowlist:HOST' : allowType === 'VERIFIED_BOT' ? `verified-bot:${verifiedBot}` : `allowlist:${allowType}`;
       const d = this.result('ALLOW', audit, 0, 0, 0, 0, reasons, basis);
       if (signals.length) this.record(built, signals, d, meta);
-      this.count(d, meta, built.ctx.rawHost);
+      this.count(d, meta, built.ctx);
       return d;
     }
 
@@ -164,7 +164,7 @@ export class ScoringService implements OnModuleInit {
     if (manual) {
       const d = this.result('BLOCK', false, 0, 0, 0, 0, [...reasons, manual.id], `manual:${manual.kind}`);
       this.record(built, signals, d, meta);
-      this.count(d, meta, built.ctx.rawHost);
+      this.count(d, meta, built.ctx);
       return d;
     }
 
@@ -253,7 +253,7 @@ export class ScoringService implements OnModuleInit {
 
     const d = this.result(action, audit, score, res.ipScore, res.fpScore, res.strongScore, reasons, basis, expiresAt);
     if (signals.length || action === 'BLOCK' || action === 'RATE_LIMIT') this.record(built, signals, d, meta);
-    this.count(d, meta, built.ctx.rawHost);
+    this.count(d, meta, built.ctx);
     return d;
   }
 
@@ -300,8 +300,20 @@ export class ScoringService implements OnModuleInit {
     return { action, audit, score, ipScore, fpScore, strongScore, reasons, basis, expiresAt };
   }
 
-  private count(d: SecurityDecision, meta: EvalMeta, host: string): void {
+  private count(d: SecurityDecision, meta: EvalMeta, ctx: BuiltContext['ctx']): void {
     if (meta.source !== 'decision') return;
+    const host = ctx.rawHost;
+    this.stats.request({
+      t: Date.now(),
+      ip: ctx.ip,
+      ipKey: ctx.ipKey,
+      host,
+      method: ctx.method,
+      path: ctx.path,
+      userAgent: ctx.userAgent,
+      action: d.audit && d.action !== 'ALLOW' ? `WOULD_${d.action}` : d.action,
+      country: ctx.country,
+    });
     const mode = d.audit ? 'audit' : 'enforce';
     this.metrics.requests.inc({ action: d.action, mode });
     this.stats.incr(`action_${d.action.toLowerCase()}`, 1, host);

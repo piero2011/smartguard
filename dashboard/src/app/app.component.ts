@@ -6,12 +6,13 @@ import { ManageComponent } from './manage.component';
 import { SitesComponent } from './sites.component';
 import { SitePickerComponent } from './site-picker.component';
 import { RulesComponent } from './rules.component';
+import { TrafficComponent } from './traffic.component';
 import { BackupComponent } from './backup.component';
 import { AllowlistComponent, BansComponent, BlockedBotsComponent, BlockedNetworksComponent, EventsComponent, OverviewComponent } from './tables.component';
 
 @Component({
   selector: 'sg-root',
-  imports: [TPipe, ManageComponent, SitesComponent, SitePickerComponent, RulesComponent, BackupComponent, OverviewComponent, BansComponent, BlockedBotsComponent, BlockedNetworksComponent, AllowlistComponent, EventsComponent],
+  imports: [TPipe, ManageComponent, SitesComponent, SitePickerComponent, RulesComponent, BackupComponent, TrafficComponent, OverviewComponent, BansComponent, BlockedBotsComponent, BlockedNetworksComponent, AllowlistComponent, EventsComponent],
   template: `
   <header>
     <div class="brand">
@@ -57,7 +58,7 @@ import { AllowlistComponent, BansComponent, BlockedBotsComponent, BlockedNetwork
       }
       @if (lastUpdate()) { <span class="muted small-text">{{ 'common.updated' | t: { time: lastUpdate() } }}</span> }
       <span class="spacer"></span>
-      @if (tab() === 'overview' || tab() === 'events') {
+      @if (tab() === 'overview' || tab() === 'events' || tab() === 'traffic') {
         <sg-site-picker />
       }
     </nav>
@@ -69,6 +70,7 @@ import { AllowlistComponent, BansComponent, BlockedBotsComponent, BlockedNetwork
         @case ('allowlist') { <sg-allowlist /> }
         @case ('events') { <sg-events /> }
         @case ('rules') { <sg-rules /> }
+        @case ('traffic') { <sg-traffic /> }
         @case ('backup') { <sg-backup /> }
       }
     </main>
@@ -96,7 +98,7 @@ export class AppComponent implements OnInit, OnDestroy {
   readonly ui = inject(Ui);
   private readonly api = inject(Api);
 
-  readonly tabs: Tab[] = ['overview', 'manage', 'rules', 'blocked', 'allowlist', 'events', 'backup'];
+  readonly tabs: Tab[] = ['overview', 'traffic', 'manage', 'rules', 'blocked', 'allowlist', 'events', 'backup'];
   readonly tab = this.ui.tab;
   readonly connected = signal(false);
   readonly tokenInput = signal('');

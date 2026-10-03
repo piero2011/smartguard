@@ -31,6 +31,13 @@ export class StatsService implements OnModuleInit, OnModuleDestroy {
   private timer: NodeJS.Timeout | null = null;
   private sitesTimer: NodeJS.Timeout | null = null;
   static readonly MAX_HOSTS_BUFFER = 64;
+  /**
+   * Últimas peticiones evaluadas por sitio, SOLO en memoria (se pierden al reiniciar; no van a Redis).
+   * Una lista por sitio para que el más visitado no desplace a los demás; "" = host no reconocido.
+   */
+  private recent = new Map<string, Ring<RecentRequest>>();
+  static readonly RECENT_PER_SITE = 300;
+  private recentSeq = 0;
   static readonly MAX_IPS_BUFFER = 20_000;
   static readonly MAX_EVENTS_BUFFER = 5_000;
   static readonly MAX_TOP_BUFFER = 5_000;
@@ -117,6 +124,23 @@ export class StatsService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /** Anota una petición evaluada (permitida o no) en la lista de tráfico reciente de su sitio. */
+  request(r: RecentRequest): void {
+    const site = this.siteName(r.host) ?? '';
+    let ring = this.recent.get(site);
+    if (!ring) {
+      if (this.recent.size > StatsService.MAX_HOSTS_BUFFER) return;
+      this.recent.set(site, (ring = new Ring(StatsService.RECENT_PER_SITE)));
+    }
+    ring.push({ ...r, n: ++this.recentSeq, host: site || r.host.slice(0, 100), path: r.path.slice(0, 200), userAgent: r.userAgent.slice(0, 200) });
+  }
+
+  /** Tráfico reciente, de más nuevo a más antiguo. `hosts`: solo esos dominios; vacío = todos. */
+  recentRequests(hosts: string[] = []): RecentRequest[] {
+    const rings = hosts.length ? hosts.map((h) => this.recent.get(h)) : [...this.recent.values()];
+    return rings.flatMap((r) => r?.all() ?? []).sort((a, b) => b.t - a.t || (b.n ?? 0) - (a.n ?? 0));
+  }
+
   event(e: SecurityEvent): void {
     if (this.events.length < StatsService.MAX_EVENTS_BUFFER) this.events.push(e);
   }
@@ -150,6 +174,38 @@ export class StatsService implements OnModuleInit, OnModuleDestroy {
     } catch (e) {
       logger.warn(`No se pudieron volcar estadísticas: ${(e as Error).message}`, 'Stats');
     }
+  }
+}
+
+/** Una petición evaluada por SmartGuard (también las permitidas), para la vista "Tráfico" del panel. */
+export interface RecentRequest {
+  t: number;
+  ip: string;
+  ipKey: string;
+  host: string;
+  method: string;
+  /** ruta SIN query string */
+  path: string;
+  userAgent: string;
+  /** ALLOW, OBSERVE, BLOCK… (WOULD_* en AUDIT) */
+  action: string;
+  country?: string;
+  /** orden de llegada: desempata peticiones del mismo milisegundo */
+  n?: number;
+}
+
+/** Lista circular de tamaño fijo: guarda las últimas `size` entradas sin reservar memoria nueva. */
+class Ring<T> {
+  private readonly items: T[] = [];
+  private next = 0;
+  constructor(private readonly size: number) {}
+  push(v: T): void {
+    if (this.items.length < this.size) this.items.push(v);
+    else this.items[this.next] = v;
+    this.next = (this.next + 1) % this.size;
+  }
+  all(): T[] {
+    return this.items;
   }
 }
 

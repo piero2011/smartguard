@@ -156,9 +156,9 @@ export class OverviewComponent {
     const t = s.totals ?? {};
     const ev = (f: EventFilter) => () => this.ui.openEvents(f);
     return [
-      { key: 'ov.decisions', value: s.requestsPerMin, open: ev('all') },
+      { key: 'ov.decisions', value: s.requestsPerMin, open: () => this.ui.tab.set('traffic') },
       { key: 'ov.logLines', value: s.logLinesPerMin, open: ev('log') },
-      { key: 'ov.activeIps', value: s.activeIps5m, open: ev('all') },
+      { key: 'ov.activeIps', value: s.activeIps5m, open: () => this.ui.tab.set('traffic') },
       { key: 'ov.bans', value: s.bansActive, open: () => this.ui.openBans(false), global: true },
       { key: 'ov.wouldBans', value: s.wouldBansActive, open: () => this.ui.openBans(true), global: true },
       { key: 'ov.suspicious', value: t['action_observe'] ?? 0, open: ev('suspicious') },
@@ -603,7 +603,8 @@ const EVENTS_MAX_ROUNDS = 8;
             <button class="small" (click)="inspect(e.ip)">{{ 'common.inspect' | t }}</button>
             <sg-block [ip]="e.ip" [ipKey]="e.ipKey ?? ''" [userAgent]="e.userAgent ?? ''" />
           </td></tr>
-      } @empty { <tr><td colspan="10" class="muted">{{ (loading() ? 'ev.loading' : 'common.none') | t }}</td></tr> }
+      } @empty { <tr><td colspan="10" class="muted">{{ (loading() ? 'ev.loading' : 'ev.none') | t }}
+          @if (!loading()) { <button class="small ghost" (click)="ui.tab.set('traffic')">{{ 'ev.seeTraffic' | t }}</button> }</td></tr> }
     </table></div>
     <div class="row between">
       <span class="muted">{{ 'ev.page' | t: { page: page(), count: events().length } }}@if (loading()) { · {{ 'ev.loading' | t }} }</span>

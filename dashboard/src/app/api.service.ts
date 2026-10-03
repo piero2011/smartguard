@@ -87,6 +87,27 @@ export interface Stats {
   degraded: boolean;
 }
 
+/** Una petición evaluada por SmartGuard (también las permitidas) */
+export interface RecentRequest {
+  t: number;
+  ip: string;
+  ipKey: string;
+  host: string;
+  method: string;
+  path: string;
+  userAgent: string;
+  action: string;
+  country?: string;
+}
+
+/** Tráfico reciente (en memoria del servicio) e IPs activas en los últimos 5 minutos */
+export interface RecentTraffic {
+  host: string;
+  stored: number;
+  activeIps: { ip: string; ipKey: string; country?: string; requests: number; lastSeen: number; lastPath: string; userAgent: string; blocked: number }[];
+  items: RecentRequest[];
+}
+
 /** Regla creada desde el panel (lo que se envía y lo que devuelve /admin/panel-rules) */
 export interface PanelRule {
   id: string;
@@ -329,6 +350,9 @@ export class Api {
   }
   bans(audit: boolean, offset = 0, limit = 500): Promise<{ total: number; items: BanRecord[] }> {
     return this.req('GET', `/admin/bans?audit=${audit}&offset=${offset}&limit=${limit}`);
+  }
+  recent(host = ''): Promise<RecentTraffic> {
+    return this.req('GET', `/admin/recent?limit=300${host ? `&host=${encodeURIComponent(host)}` : ''}`);
   }
   rules(): Promise<{ rules: RuleInfo[] }> {
     return this.req('GET', '/admin/rules');

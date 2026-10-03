@@ -369,6 +369,26 @@ describe('Estadísticas por sitio (API)', () => {
     expect((await get('/admin/stats?host=No%20Valido')).statusCode).toBe(400);
   });
 
+  it('tráfico reciente: también las peticiones permitidas, con las IPs activas del sitio', async () => {
+    const get = (url: string) => app.inject({ method: 'GET', url, headers: { authorization: `Bearer ${TOKEN}` }, remoteAddress: '127.0.0.1' });
+    await decide('198.51.100.140', '/producto/gorra/?utm=1', { 'x-host': 'trafico.test' });
+    await decide('198.51.100.140', '/carrito/', { 'x-host': 'trafico.test' });
+    await decide('198.51.100.141', '/', { 'x-host': 'trafico.test' });
+    await decide('198.51.100.142', '/', { 'x-host': 'otro-sitio.test' });
+    const r = (await get('/admin/recent?host=trafico.test')).json();
+    // más nuevo primero, ruta sin query string, y solo de ese sitio
+    expect(r.items.map((i: { ip: string; path: string; action: string }) => [i.ip, i.path, i.action])).toEqual([
+      ['198.51.100.141', '/', 'ALLOW'],
+      ['198.51.100.140', '/carrito/', 'ALLOW'],
+      ['198.51.100.140', '/producto/gorra/', 'ALLOW'],
+    ]);
+    expect(r.activeIps.map((i: { ip: string; requests: number }) => [i.ip, i.requests])).toEqual([
+      ['198.51.100.140', 2],
+      ['198.51.100.141', 1],
+    ]);
+    expect((await get('/admin/recent')).json().stored).toBeGreaterThan(3);
+  });
+
   it('los dominios de un mismo sitio (www, alias) se agrupan bajo un solo nombre', async () => {
     const get = (url: string) => app.inject({ method: 'GET', url, headers: { authorization: `Bearer ${TOKEN}` }, remoteAddress: '127.0.0.1' });
     // como si Nginx tuviera un vhost protegido con esos dos dominios

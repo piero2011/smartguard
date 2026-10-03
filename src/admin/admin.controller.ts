@@ -10,9 +10,9 @@ import { ModeService } from '../scoring/mode.service';
 import { CloudflareRangesService } from '../cloudflare/cloudflare-ranges.service';
 import { ParsedIp, ipKey, parseIp } from '../common/ip.util';
 import { formatDuration, parseDuration } from '../common/uri.util';
-import { currentMinute } from '../stats/stats.service';
+import { StatsService, currentMinute } from '../stats/stats.service';
 import { AllowValueParam, Infer, IpParam, ValidBody, ValidQuery } from '../common/validation';
-import { AllowBody, BanBody, BotBody, BotQuery, EventsPageQuery, EventsQuery, IpInfoQuery, PanelRuleBody, PanelRuleQuery, ListQuery, LookupQuery, ModeBody, NetworkBody, NetworkQuery, StatsQuery, UnbanQuery } from './admin.schemas';
+import { AllowBody, BanBody, BotBody, BotQuery, EventsPageQuery, EventsQuery, IpInfoQuery, PanelRuleBody, PanelRuleQuery, RecentQuery, ListQuery, LookupQuery, ModeBody, NetworkBody, NetworkQuery, StatsQuery, UnbanQuery } from './admin.schemas';
 import { BlocklistService } from '../blocklist/blocklist.service';
 import { IpInfoService } from '../ipinfo/ipinfo.service';
 import { ApiError } from '../common/api-error';
@@ -66,6 +66,7 @@ export class AdminController {
     private readonly ipinfo: IpInfoService,
     private readonly system: SystemInfoService,
     private readonly nginxSites: NginxSitesService,
+    private readonly statsService: StatsService,
   ) {}
 
   private key(ip: ParsedIp): string {
@@ -389,6 +390,35 @@ export class AdminController {
       .map(([member, score]) => ({ member, score }))
       .sort((a, b) => b.score - a.score)
       .slice(0, 15);
+  }
+
+  /**
+   * Tráfico reciente: las últimas peticiones que SmartGuard evaluó (también las permitidas, que no
+   * generan evento de seguridad) y las IPs activas en los últimos 5 minutos. Solo en memoria.
+   */
+  @Get('recent')
+  async recent(@ValidQuery(RecentQuery) q: Infer<typeof RecentQuery>): Promise<unknown> {
+    const names = q.host ? ((await this.nginxSites.groups()).get(q.host) ?? [q.host]) : [];
+    const all = this.statsService.recentRequests(names);
+    const since = Date.now() - 5 * 60_000;
+    const ips = new Map<string, { ip: string; ipKey: string; country?: string; requests: number; lastSeen: number; lastPath: string; userAgent: string; blocked: number }>();
+    for (const r of all) {
+      if (r.t < since) break; // ordenado de más nuevo a más antiguo
+      const cur = ips.get(r.ipKey);
+      if (cur) {
+        cur.requests++;
+        if (r.action === 'BLOCK' || r.action === 'RATE_LIMIT') cur.blocked++;
+      } else {
+        ips.set(r.ipKey, { ip: r.ip, ipKey: r.ipKey, country: r.country, requests: 1, lastSeen: r.t, lastPath: r.path, userAgent: r.userAgent, blocked: r.action === 'BLOCK' || r.action === 'RATE_LIMIT' ? 1 : 0 });
+      }
+    }
+    return {
+      host: q.host ?? '',
+      /** entradas guardadas (como mucho 300 por sitio) */
+      stored: all.length,
+      activeIps: [...ips.values()].sort((a, b) => b.requests - a.requests).slice(0, 100),
+      items: all.slice(0, q.limit ?? 200),
+    };
   }
 
   @Get('events')

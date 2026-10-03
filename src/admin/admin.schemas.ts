@@ -121,6 +121,11 @@ export const EventsPageQuery = {
 /** Host de un sitio protegido (dominio en minúsculas) */
 const hostField = () => field.optional(field.string({ max: 100, pattern: /^[a-z0-9]([a-z0-9.-]{0,98}[a-z0-9])?$/, message: 'must be a host name' }));
 
+export const RecentQuery = {
+  host: hostField(),
+  limit: field.optional(field.int({ min: 1, max: 300 })),
+};
+
 export const StatsQuery = {
   minutes: field.optional(field.int({ min: 1, max: 1440 })),
   /** solo las cifras de este sitio; sin él, la suma de todos */
