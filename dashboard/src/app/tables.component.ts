@@ -1,7 +1,7 @@
-import { Component, effect, inject, signal } from '@angular/core';
+import { Component, computed, effect, inject, signal } from '@angular/core';
 import { AllowList, Api, ApiErr, BanRecord, SecurityEvent, Stats } from './api.service';
 import { I18n, TPipe } from './i18n';
-import { Ui } from './ui';
+import { EventFilter, Ui } from './ui';
 
 /** Resumen: tarjetas + top rutas / IPs / reglas */
 @Component({
@@ -11,13 +11,15 @@ import { Ui } from './ui';
   @if (stats(); as s) {
     <div class="cards">
       @for (c of cards(s); track c.key) {
-        <div class="stat"><b>{{ c.value }}</b><span>{{ c.key | t }}</span></div>
+        <button type="button" class="stat" [title]="'ov.open' | t" (click)="c.open()"><b>{{ c.value }}</b><span>{{ c.key | t }}</span></button>
       }
     </div>
     <div class="grid3">
       <section class="card"><h2>{{ 'ov.topPaths' | t }}</h2>
         <table><tr><th>{{ 'ov.path' | t }}</th><th class="num">{{ 'ov.hits' | t }}</th></tr>
-          @for (r of s.topPaths; track r.member) { <tr><td><code>{{ r.member }}</code></td><td class="num">{{ r.score }}</td></tr> }
+          @for (r of s.topPaths; track r.member) {
+            <tr class="link" [title]="'ov.open' | t" (click)="ui.openEvents('all', r.member)"><td><code>{{ r.member }}</code></td><td class="num">{{ r.score }}</td></tr>
+          }
           @empty { <tr><td colspan="2" class="muted">{{ 'common.none' | t }}</td></tr> }
         </table></section>
       <section class="card"><h2>{{ 'ov.topIps' | t }}</h2>
@@ -29,7 +31,9 @@ import { Ui } from './ui';
         </table></section>
       <section class="card"><h2>{{ 'ov.topRules' | t }}</h2>
         <table><tr><th>{{ 'ov.rule' | t }}</th><th class="num">{{ 'ov.hits' | t }}</th></tr>
-          @for (r of s.topRules; track r.member) { <tr><td>{{ r.member }}</td><td class="num">{{ r.score }}</td></tr> }
+          @for (r of s.topRules; track r.member) {
+            <tr class="link" [title]="'ov.open' | t" (click)="ui.openEvents('all', r.member)"><td>{{ r.member }}</td><td class="num">{{ r.score }}</td></tr>
+          }
           @empty { <tr><td colspan="2" class="muted">{{ 'common.none' | t }}</td></tr> }
         </table></section>
     </div>
@@ -38,7 +42,7 @@ import { Ui } from './ui';
 })
 export class OverviewComponent {
   private readonly api = inject(Api);
-  private readonly ui = inject(Ui);
+  readonly ui = inject(Ui);
   readonly stats = signal<Stats | null>(null);
 
   constructor() {
@@ -56,21 +60,23 @@ export class OverviewComponent {
     }
   }
 
-  cards(s: Stats): { key: string; value: number }[] {
+  /** Cada tarjeta abre el detalle de su contador: Eventos (ya filtrados) o Bloqueadas. */
+  cards(s: Stats): { key: string; value: number; open: () => void }[] {
     const t = s.totals ?? {};
+    const ev = (f: EventFilter) => () => this.ui.openEvents(f);
     return [
-      { key: 'ov.decisions', value: s.requestsPerMin },
-      { key: 'ov.logLines', value: s.logLinesPerMin },
-      { key: 'ov.activeIps', value: s.activeIps5m },
-      { key: 'ov.bans', value: s.bansActive },
-      { key: 'ov.wouldBans', value: s.wouldBansActive },
-      { key: 'ov.suspicious', value: t['action_observe'] ?? 0 },
-      { key: 'ov.sg403', value: t['blocked_403'] ?? 0 },
-      { key: 'ov.sg429', value: t['limited_429'] ?? 0 },
-      { key: 'ov.nginx403', value: t['log_403'] ?? 0 },
-      { key: 'ov.nginx429', value: t['log_429'] ?? 0 },
-      { key: 'ov.phpAvoided', value: t['php_avoided'] ?? 0 },
-      { key: 'ov.wouldBlock', value: (t['would_block'] ?? 0) + (t['would_rate_limit'] ?? 0) },
+      { key: 'ov.decisions', value: s.requestsPerMin, open: ev('all') },
+      { key: 'ov.logLines', value: s.logLinesPerMin, open: ev('log') },
+      { key: 'ov.activeIps', value: s.activeIps5m, open: ev('all') },
+      { key: 'ov.bans', value: s.bansActive, open: () => this.ui.openBans(false) },
+      { key: 'ov.wouldBans', value: s.wouldBansActive, open: () => this.ui.openBans(true) },
+      { key: 'ov.suspicious', value: t['action_observe'] ?? 0, open: ev('suspicious') },
+      { key: 'ov.sg403', value: t['blocked_403'] ?? 0, open: ev('blocked') },
+      { key: 'ov.sg429', value: t['limited_429'] ?? 0, open: ev('limited') },
+      { key: 'ov.nginx403', value: t['log_403'] ?? 0, open: ev('st403') },
+      { key: 'ov.nginx429', value: t['log_429'] ?? 0, open: ev('st429') },
+      { key: 'ov.phpAvoided', value: t['php_avoided'] ?? 0, open: ev('denied') },
+      { key: 'ov.wouldBlock', value: (t['would_block'] ?? 0) + (t['would_rate_limit'] ?? 0), open: ev('wouldBlock') },
     ];
   }
 
@@ -119,7 +125,7 @@ export class BansComponent {
   private readonly ui = inject(Ui);
   readonly i18n = inject(I18n);
   readonly items = signal<BanRecord[]>([]);
-  readonly showAudit = signal(false);
+  readonly showAudit = this.ui.showAuditBans;
 
   constructor() {
     effect(() => {
@@ -252,31 +258,63 @@ export class AllowlistComponent {
   }
 }
 
+/** Qué eventos muestra cada filtro. La acción llega como BLOCK o, en AUDIT, WOULD_BLOCK. */
+const EVENT_FILTERS: Record<EventFilter, (e: SecurityEvent) => boolean> = {
+  all: () => true,
+  log: (e) => e.source === 'analyzer',
+  suspicious: (e) => (e.action ?? '').endsWith('OBSERVE'),
+  wouldBlock: (e) => e.action === 'WOULD_BLOCK' || e.action === 'WOULD_RATE_LIMIT',
+  blocked: (e) => e.action === 'BLOCK',
+  limited: (e) => e.action === 'RATE_LIMIT',
+  st403: (e) => e.status === 403,
+  st429: (e) => e.status === 429,
+  denied: (e) => e.source === 'analyzer' && [403, 404, 429, 444].includes(e.status ?? 0),
+};
+
 /** Eventos de seguridad recientes */
 @Component({
   selector: 'sg-events',
   imports: [TPipe],
   template: `
   <section class="card">
-    <h2>{{ 'ev.title' | t }}</h2>
+    <div class="row between">
+      <h2>{{ 'ev.title' | t }} ({{ shown().length }} / {{ events().length }})</h2>
+      <div class="row">
+        <select [attr.aria-label]="'ev.filter' | t" (change)="ui.eventFilter.set($any($event.target).value)">
+          @for (f of filters; track f) { <option [value]="f" [selected]="ui.eventFilter() === f">{{ ('ev.f.' + f) | t }}</option> }
+        </select>
+        <input type="search" [placeholder]="'ev.search' | t" [value]="ui.eventQuery()" (input)="ui.eventQuery.set($any($event.target).value)">
+      </div>
+    </div>
     <div class="scroll"><table>
       <tr><th>{{ 'ev.time' | t }}</th><th>{{ 'ev.action' | t }}</th><th>IP</th><th>{{ 'ev.country' | t }}</th><th>{{ 'ev.host' | t }}</th>
         <th>{{ 'ev.method' | t }}</th><th>{{ 'ev.uri' | t }}</th><th>{{ 'ev.status' | t }}</th><th>{{ 'ev.category' | t }}</th>
-        <th class="num">{{ 'ev.delta' | t }}</th><th>{{ 'ev.reason' | t }}</th></tr>
-      @for (e of events(); track $index) {
-        <tr><td>{{ i18n.date(e.timestamp) }}</td><td>{{ e.action }}</td><td><code>{{ e.ip }}</code></td><td>{{ e.country ?? '' }}</td>
+        <th class="num">{{ 'ev.delta' | t }}</th><th>{{ 'ev.reason' | t }}</th><th></th></tr>
+      @for (e of shown(); track $index) {
+        <tr [title]="e.userAgent ?? ''"><td>{{ i18n.date(e.timestamp) }}</td><td>{{ e.action }}</td><td><code>{{ e.ip }}</code></td><td>{{ e.country ?? '' }}</td>
           <td>{{ e.host }}</td><td>{{ e.method }}</td><td><code>{{ e.uri }}</code></td><td>{{ e.status ?? '' }}</td>
-          <td>{{ e.category }}</td><td class="num">{{ e.scoreDelta }}</td><td>{{ e.reason }}</td></tr>
-      } @empty { <tr><td colspan="11" class="muted">{{ 'common.none' | t }}</td></tr> }
+          <td>{{ e.category }}</td><td class="num">{{ e.scoreDelta }}</td><td>{{ e.reason }}</td>
+          <td><button class="small" (click)="inspect(e.ip)">{{ 'common.inspect' | t }}</button></td></tr>
+      } @empty { <tr><td colspan="12" class="muted">{{ 'common.none' | t }}</td></tr> }
     </table></div>
   </section>
   `,
 })
 export class EventsComponent {
   private readonly api = inject(Api);
-  private readonly ui = inject(Ui);
+  readonly ui = inject(Ui);
   readonly i18n = inject(I18n);
   readonly events = signal<SecurityEvent[]>([]);
+  readonly filters: EventFilter[] = ['all', 'log', 'suspicious', 'wouldBlock', 'blocked', 'limited', 'st403', 'st429', 'denied'];
+
+  /** Eventos que pasan el filtro elegido y el texto buscado (IP, ruta, motivo, host o User-Agent). */
+  readonly shown = computed(() => {
+    const match = EVENT_FILTERS[this.ui.eventFilter()];
+    const q = this.ui.eventQuery().trim().toLowerCase();
+    return this.events().filter(
+      (e) => match(e) && (!q || [e.ip, e.uri, e.reason, e.host, e.category, e.userAgent ?? ''].some((v) => String(v ?? '').toLowerCase().includes(q))),
+    );
+  });
 
   constructor() {
     effect(() => {
@@ -287,7 +325,15 @@ export class EventsComponent {
 
   async load(): Promise<void> {
     try {
-      this.events.set(await this.api.events(150));
+      this.events.set(await this.api.events(1000));
+    } catch (e) {
+      this.ui.notify('error', () => this.api.describe(e as ApiErr));
+    }
+  }
+
+  async inspect(ip: string): Promise<void> {
+    try {
+      this.ui.inspect.set({ ip, text: (await this.api.explain(ip)).explanation });
     } catch (e) {
       this.ui.notify('error', () => this.api.describe(e as ApiErr));
     }

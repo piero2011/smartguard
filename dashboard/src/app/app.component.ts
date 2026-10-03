@@ -1,11 +1,9 @@
 import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
 import { Api, ApiErr } from './api.service';
 import { I18n, Lang, TPipe } from './i18n';
-import { Ui } from './ui';
+import { Tab, Ui } from './ui';
 import { ManageComponent } from './manage.component';
 import { AllowlistComponent, BansComponent, EventsComponent, OverviewComponent } from './tables.component';
-
-type Tab = 'overview' | 'manage' | 'blocked' | 'allowlist' | 'events';
 
 @Component({
   selector: 'sg-root',
@@ -87,7 +85,7 @@ export class AppComponent implements OnInit, OnDestroy {
   private readonly api = inject(Api);
 
   readonly tabs: Tab[] = ['overview', 'manage', 'blocked', 'allowlist', 'events'];
-  readonly tab = signal<Tab>('manage');
+  readonly tab = this.ui.tab;
   readonly connected = signal(false);
   readonly tokenInput = signal('');
   readonly authError = signal('');

@@ -45,6 +45,10 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
 button.danger { background: var(--danger); border-color: var(--danger); color: var(--on-danger); font-weight: 600; }
 button.small { padding: 3px 8px; font-size: 12px; }
+button.stat { display: block; width: 100%; text-align: left; border-radius: 10px; padding: 10px 12px; }
+button.stat:hover { background: var(--neutral-bg); }
+tr.link { cursor: pointer; }
+tr.link:hover { background: var(--neutral-bg); }
 .muted { color: var(--muted); }
 .small-text { font-size: 12px; margin-left: 8px; }
 .msg { padding: 8px 10px; border-radius: 6px; margin: 8px 0; }

@@ -93,6 +93,9 @@ export interface SecurityEvent {
   reason: string;
   action?: string;
   country?: string;
+  /** 'decision' (auth_request) o 'analyzer' (log de Nginx) */
+  source?: string;
+  userAgent?: string;
 }
 
 export interface Explanation {
