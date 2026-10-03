@@ -59,11 +59,12 @@ if ! nginx_safe_reload; then
 fi
 
 # 2) Servicios
-for u in smartguard.service smartguard-nft.service smartguard-cf-ips.timer smartguard-cf-ips.service; do
+for u in smartguard-reprotect.path smartguard-reprotect.service smartguard.service smartguard-nft.service smartguard-cf-ips.timer smartguard-cf-ips.service; do
   run systemctl disable --now "$u" 2>/dev/null || true
 done
 run rm -f /etc/systemd/system/smartguard.service /etc/systemd/system/smartguard-nft.service \
-          /etc/systemd/system/smartguard-cf-ips.service /etc/systemd/system/smartguard-cf-ips.timer
+          /etc/systemd/system/smartguard-cf-ips.service /etc/systemd/system/smartguard-cf-ips.timer \
+          /etc/systemd/system/smartguard-reprotect.path /etc/systemd/system/smartguard-reprotect.service
 run rm -rf /etc/systemd/system/smartguard.service.d
 run systemctl daemon-reload
 

@@ -129,8 +129,17 @@ run install -d -o root -g root -m 0755 "$SG_NGXVIEW" "$SG_NGXVIEW/sites-enabled"
 UNIT=/etc/systemd/system/smartguard.service
 [ -f "$UNIT" ] && run cp -a "$UNIT" "$UNIT.prev"
 sed "s|^ExecStart=/usr/bin/node |ExecStart=$NODE_BIN |" "$SRC_DIR/systemd/smartguard.service" | write_file "$UNIT" 0644
+# Vigilancia de los vhosts: repone la protección si CloudPanel reescribe uno (smartguard protect)
+run install -o root -g root -m 0644 "$SRC_DIR/systemd/smartguard-reprotect.path" /etc/systemd/system/smartguard-reprotect.path
+run install -o root -g root -m 0644 "$SRC_DIR/systemd/smartguard-reprotect.service" /etc/systemd/system/smartguard-reprotect.service
+# Los sitios protegidos antes de existir el registro llevan la marca de "smartguard protect" en su vhost
+if [ "$DRY_RUN" != true ] && [ ! -f "$SG_PROTECTED" ]; then
+  { grep -l 'smartguard protect' "$NGX_DIR"/sites-enabled/*.conf 2>/dev/null || true; } \
+    | sed -e 's|.*/||' -e 's|\.conf$||' | sort -u | write_file "$SG_PROTECTED" 0644
+fi
 run systemctl daemon-reload
 run systemctl restart smartguard
+run systemctl enable --now smartguard-reprotect.path || warn "No se pudo activar smartguard-reprotect.path"
 
 if [ "$DRY_RUN" = true ] || health; then
   ok "SmartGuard $NEW en marcha. Versión anterior en $SG_OPT.prev (revertir: update.sh --revert)"

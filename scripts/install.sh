@@ -270,9 +270,13 @@ if [ "$ENABLE_NFT" = true ]; then
   env_set ENABLE_NFTABLES true
 fi
 
+# Vigilancia de los vhosts: repone la protección si CloudPanel reescribe uno (smartguard protect)
+run install -o root -g root -m 0644 "$SRC_DIR/systemd/smartguard-reprotect.path" /etc/systemd/system/smartguard-reprotect.path
+run install -o root -g root -m 0644 "$SRC_DIR/systemd/smartguard-reprotect.service" /etc/systemd/system/smartguard-reprotect.service
 run systemctl daemon-reload
 [ "$ENABLE_NFT" = true ] && run systemctl enable --now smartguard-nft.service
 run systemctl enable --now smartguard-cf-ips.timer
+run systemctl enable --now smartguard-reprotect.path
 run systemctl enable smartguard.service
 run systemctl restart smartguard.service
 

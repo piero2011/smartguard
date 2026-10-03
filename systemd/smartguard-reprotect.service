@@ -1,0 +1,10 @@
+[Unit]
+Description=SmartGuard - repone la protección en los sitios registrados (smartguard protect)
+Documentation=file:///opt/smartguard/README.md
+After=nginx.service
+
+[Service]
+Type=oneshot
+# Solo toca los sitios de /etc/smartguard/protected-sites a los que les falten los include.
+# Comprueba con nginx -t antes de recargar y deja el vhost como estaba si Nginx lo rechaza.
+ExecStart=/usr/local/bin/smartguard reprotect

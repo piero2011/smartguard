@@ -1,0 +1,12 @@
+[Unit]
+Description=SmartGuard - vigila los vhosts de Nginx para mantener la protección de los sitios
+Documentation=file:///opt/smartguard/README.md
+
+[Path]
+# CloudPanel reescribe el vhost entero cuando se guarda desde su panel (y se pierden los include
+# de SmartGuard). Cualquier cambio en la carpeta lanza smartguard-reprotect.service, que los repone.
+PathChanged=/etc/nginx/sites-enabled
+Unit=smartguard-reprotect.service
+
+[Install]
+WantedBy=multi-user.target

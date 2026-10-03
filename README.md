@@ -466,12 +466,20 @@ sudo /opt/smartguard/scripts/rollback-nginx.sh --restore /etc/nginx/backups/ngin
 sudo smartguard protect tienda.com otra.com                   # añade la protección a esos sitios (edita su vhost, nginx -t, recarga)
 sudo smartguard protect tienda.com --dry-run                  # solo enseña qué líneas añadiría
 sudo smartguard unprotect tienda.com                          # quita los include de SmartGuard de ese sitio
+sudo smartguard protected                                     # sitios registrados con «protect»
 sudo smartguard update                                        # si hay cambios en GitHub, los descarga e instala
 sudo smartguard update --check                                # solo dice si hay una versión nueva
 cd nueva-version && sudo ./scripts/update.sh                  # lo mismo a mano, desde una copia ya descargada
 sudo /opt/smartguard/scripts/update.sh --revert
 sudo /opt/smartguard/scripts/uninstall.sh [--purge]
 ```
+
+Los sitios añadidos con `smartguard protect` quedan registrados en `/etc/smartguard/protected-sites`.
+CloudPanel guarda su propia copia de cada vhost y reescribe el archivo entero cuando se guarda desde su
+panel, con lo que se pierden los include: `smartguard-reprotect.path` vigila `/etc/nginx/sites-enabled`
+y, en cuanto cambia algo, `smartguard reprotect` los repone en los sitios registrados (con `nginx -t`;
+si Nginx los rechaza deja el vhost como estaba y no reintenta hasta que el vhost cambie de nuevo).
+Para dejar de proteger un sitio hay que usar `smartguard unprotect`, no borrar las líneas a mano.
 
 `smartguard update` compara el commit instalado (`/opt/smartguard/COMMIT`) con la rama `UPDATE_BRANCH`
 de `UPDATE_REPO`. Si coinciden no hace nada; si no, descarga a `/opt/smartguard-src` y ejecuta

@@ -7,6 +7,9 @@ SG_OPT=/opt/smartguard
 SG_ETC=/etc/smartguard
 SG_ENV=$SG_ETC/smartguard.env
 SG_VAR=/var/lib/smartguard
+# Sitios protegidos con "smartguard protect" (uno por línea): a estos se les repone la protección
+# si CloudPanel reescribe su vhost
+SG_PROTECTED=$SG_ETC/protected-sites
 # Puntos de montaje donde systemd expone los vhosts de Nginx al servicio, en solo lectura
 SG_NGXVIEW=$SG_VAR/nginx-view
 # Copia de trabajo de GitHub que usa "smartguard update" (propiedad de root)
