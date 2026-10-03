@@ -49,7 +49,7 @@ write_file() {
   local dest=$1 mode=${2:-0644} owner=${3:-root:root} tmp
   if [ "$DRY_RUN" = true ]; then
     printf '%s[dry-run]%s escribiría %s (%s %s):\n' "$C_YLW" "$C_RST" "$dest" "$mode" "$owner"
-    sed 's/^/    | /' | head -n 40
+    sed -n -e 's/^/    | /' -e '1,40p'
     return 0
   fi
   tmp=$(mktemp "$(dirname "$dest")/.sg.XXXXXX")

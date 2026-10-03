@@ -69,8 +69,8 @@ ok "Node $NODE_VER en $NODE_BIN"
 
 NGX_V=$(nginx -v 2>&1 | sed -E 's/.*nginx\/([0-9.]+).*/\1/')
 NGX_FLAGS=$(nginx -V 2>&1)
-echo "$NGX_FLAGS" | grep -q -- '--with-http_auth_request_module' || die "Nginx sin http_auth_request_module (necesario para SmartGuard en línea)."
-echo "$NGX_FLAGS" | grep -q -- '--with-http_realip_module' || die "Nginx sin http_realip_module (necesario para la IP real con Cloudflare)."
+grep -q -- '--with-http_auth_request_module' <<<"$NGX_FLAGS" || die "Nginx sin http_auth_request_module (necesario para SmartGuard en línea)."
+grep -q -- '--with-http_realip_module' <<<"$NGX_FLAGS" || die "Nginx sin http_realip_module (necesario para la IP real con Cloudflare)."
 "$NODE_BIN" -e "const v='$NGX_V'.split('.').map(Number);process.exit(v[0]>1||(v[0]===1&&v[1]>=18)?0:1)" \
   || die "Nginx $NGX_V demasiado antiguo (mínimo 1.18: limit_req_dry_run, \$limit_req_status)."
 ok "Nginx $NGX_V con auth_request y realip"
@@ -84,11 +84,19 @@ esac
 ok "Contexto http de SmartGuard: $NGX_CONFD"
 
 REALIP_EXISTS=false
-if echo "$NGX_T" | grep -v '/etc/nginx/smartguard/' | grep -qE '^[[:space:]]*(real_ip_header|set_real_ip_from)[[:space:]]'; then
+# real_ip definido FUERA de /etc/nginx/smartguard/ (nginx -T marca cada archivo con
+# "# configuration file <ruta>:"; así una reinstalación no cuenta el realip propio).
+# Sin "grep -q" ni "head" leyendo de una tubería: con un nginx -T grande cortan la lectura, el
+# productor recibe SIGPIPE y pipefail lo convierte en un falso "no existe".
+REALIP_FOUND=$(awk '
+  /^# configuration file / { f = $4; sub(/:$/, "", f); next }
+  f !~ /^\/etc\/nginx\/smartguard\// && /^[[:space:]]*(real_ip_header|set_real_ip_from|real_ip_recursive)[[:space:]]/ { print f ": " $0 }
+' <<<"$NGX_T")
+if [ -n "$REALIP_FOUND" ]; then
   REALIP_EXISTS=true
   warn "Ya existe configuración real_ip en Nginx: NO se activará cloudflare-realip.conf (evita 'duplicate')."
   warn "Verifica que sea CF-Connecting-IP con las redes oficiales de Cloudflare:"
-  echo "$NGX_T" | grep -nE '^[[:space:]]*(real_ip_header|set_real_ip_from|real_ip_recursive)' | head -n 5 | sed 's/^/    /'
+  sed -n -e 's/^/    /' -e '1,8p' <<<"$REALIP_FOUND"
 fi
 [ "$SKIP_REALIP" = true ] && REALIP_EXISTS=true
 
