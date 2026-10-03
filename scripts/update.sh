@@ -43,6 +43,11 @@ if [ "$REVERT" = true ]; then
   confirm "¿Volver a la versión anterior de SmartGuard?" || die "Cancelado."
   run mv "$SG_OPT" "$SG_OPT.failed.$(date +%s)"
   run mv "$SG_OPT.prev" "$SG_OPT"
+  # la versión anterior arranca con su propia unidad systemd, si se guardó
+  if [ -f /etc/systemd/system/smartguard.service.prev ]; then
+    run mv -f /etc/systemd/system/smartguard.service.prev /etc/systemd/system/smartguard.service
+    run systemctl daemon-reload
+  fi
   run systemctl restart smartguard
   health && ok "Versión anterior restaurada" || warn "No responde: journalctl -u smartguard -n 50"
   exit 0
@@ -118,7 +123,12 @@ fi
 run install -o root -g root -m 0755 "$SRC_DIR/bin/smartguard" "$SG_CLI"
 [ -f "$SG_FWSYNC" ] && run install -o root -g root -m 0750 "$SRC_DIR/scripts/smartguard-fw-sync" "$SG_FWSYNC"
 NODE_BIN=$(node_bin)
-sed "s|^ExecStart=/usr/bin/node |ExecStart=$NODE_BIN |" "$SRC_DIR/systemd/smartguard.service" | write_file /etc/systemd/system/smartguard.service 0644
+# Los puntos de montaje de BindReadOnlyPaths deben existir ANTES de arrancar con la unidad nueva
+run install -d -o root -g root -m 0755 "$SG_NGXVIEW" "$SG_NGXVIEW/sites-enabled" "$SG_NGXVIEW/conf.d"
+# Copia de la unidad systemd actual: si la nueva no arranca, se vuelve a esta junto con el código
+UNIT=/etc/systemd/system/smartguard.service
+[ -f "$UNIT" ] && run cp -a "$UNIT" "$UNIT.prev"
+sed "s|^ExecStart=/usr/bin/node |ExecStart=$NODE_BIN |" "$SRC_DIR/systemd/smartguard.service" | write_file "$UNIT" 0644
 run systemctl daemon-reload
 run systemctl restart smartguard
 
@@ -127,6 +137,7 @@ if [ "$DRY_RUN" = true ] || health; then
 else
   warn "La nueva versión no responde; revirtiendo…"
   mv "$SG_OPT" "$SG_OPT.failed.$(date +%s)"; mv "$SG_OPT.prev" "$SG_OPT"
+  if [ -f "$UNIT.prev" ]; then mv -f "$UNIT.prev" "$UNIT"; systemctl daemon-reload; fi
   systemctl restart smartguard
   die "Actualización revertida. Revisa: journalctl -u smartguard -n 80 --no-pager"
 fi

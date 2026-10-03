@@ -31,17 +31,31 @@ describe('Sitios de Nginx protegidos', () => {
 
   it('lista los sitios de una carpeta: protegidos primero, exentos marcados, sin los archivos propios', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'sg-sites-'));
+    await fs.mkdir(path.join(dir, 'vista-vacia'));
     await fs.writeFile(path.join(dir, 'shop.test.conf'), PROTECTED);
     await fs.writeFile(path.join(dir, 'api.shop.test.conf'), COMMENTED);
     await fs.writeFile(path.join(dir, '00-smartguard.conf'), 'server { server_name ignored.test; }');
     await fs.writeFile(path.join(dir, 'maps.conf'), 'map $a $b { default 0; }');
     const svc = new NginxSitesService({ hostAllowed: (h: string) => h === 'api.shop.test' } as never);
-    const r = await svc.list([dir, path.join(dir, 'no-existe')]);
+    const r = await svc.list([[path.join(dir, 'vista-vacia'), dir], [path.join(dir, 'no-existe')]]);
     expect(r.readable).toBe(true);
     expect(r.items.map((s) => [s.file, s.status, s.exempt])).toEqual([
       ['shop.test.conf', 'full', false],
       ['api.shop.test.conf', 'none', true],
     ]);
+    await fs.rm(dir, { recursive: true });
+  });
+});
+
+describe('Sitios de Nginx: permisos', () => {
+  it('una carpeta que existe pero no se puede listar se informa como sin acceso', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'sg-sites-'));
+    const notADir = path.join(dir, 'archivo');
+    await fs.writeFile(notADir, 'x');
+    const svc = new NginxSitesService({ hostAllowed: () => false } as never);
+    // listar un archivo falla con ENOTDIR: mismo camino que un EACCES
+    expect(await svc.list([[notADir]])).toMatchObject({ readable: false, dirs: [notADir], items: [] });
+    expect(await svc.list([[path.join(dir, 'no-existe')]])).toMatchObject({ readable: true, items: [] });
     await fs.rm(dir, { recursive: true });
   });
 });

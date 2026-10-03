@@ -33,6 +33,10 @@ ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/var/lib/smartguard
 ReadOnlyPaths=/etc/smartguard -/var/log/nginx/smartguard
+# Vista de SOLO LECTURA de los vhosts para el panel ("sitios protegidos"). /etc/nginx no es
+# accesible para el usuario smartguard; el montaje lo hace systemd y no cambia permisos en disco.
+# Los destinos los crean install.sh/update.sh. "-" = se ignora si el origen no existe.
+BindReadOnlyPaths=-/etc/nginx/sites-enabled:/var/lib/smartguard/nginx-view/sites-enabled -/etc/nginx/conf.d:/var/lib/smartguard/nginx-view/conf.d
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectKernelLogs=true

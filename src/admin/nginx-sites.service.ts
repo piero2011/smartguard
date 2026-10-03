@@ -25,7 +25,15 @@ export interface NginxSite extends ParsedVhost {
   exempt: boolean;
 }
 
-const SITE_DIRS = ['/etc/nginx/sites-enabled', '/etc/nginx/conf.d'];
+/**
+ * Carpetas de vhosts. Cada una tiene dos rutas: la vista de solo lectura que monta systemd
+ * (BindReadOnlyPaths de smartguard.service; /etc/nginx no es accesible para el usuario del
+ * servicio) y la ruta real, por si el servicio corre sin esa restricción.
+ */
+const SITE_DIRS: string[][] = [
+  ['/var/lib/smartguard/nginx-view/sites-enabled', '/etc/nginx/sites-enabled'],
+  ['/var/lib/smartguard/nginx-view/conf.d', '/etc/nginx/conf.d'],
+];
 /** archivos propios de SmartGuard (contexto http), no son sitios */
 const OWN_FILE = /^(\d+-)?smartguard\.conf$/;
 const MAX_FILE_BYTES = 512 * 1024;
@@ -61,18 +69,29 @@ export class NginxSitesService {
 
   constructor(private readonly allowlist: AllowlistService) {}
 
-  async list(dirs: string[] = SITE_DIRS): Promise<{ readable: boolean; dirs: string[]; items: NginxSite[] }> {
+  async list(dirs: string[][] = SITE_DIRS): Promise<{ readable: boolean; dirs: string[]; items: NginxSite[] }> {
     if (this.cache && Date.now() - this.cache.at < TTL_MS && dirs === SITE_DIRS) return this.cache.value;
     const items: NginxSite[] = [];
     let found = 0;
     let unreadable = 0;
-    for (const dir of dirs) {
-      let files: string[];
-      try {
-        files = (await fs.readdir(dir)).filter((f) => f.endsWith('.conf') && !OWN_FILE.test(f)).sort();
-      } catch {
-        continue;
+    const denied: string[] = [];
+    for (const candidates of dirs) {
+      // se usa la primera ruta que se pueda listar y tenga archivos (la vista montada, si existe)
+      let dir = '';
+      let files: string[] = [];
+      for (const candidate of candidates) {
+        try {
+          const all = await fs.readdir(candidate);
+          if (all.length === 0) continue; // punto de montaje vacío: la vista no está montada
+          dir = candidate;
+          files = all.filter((f) => f.endsWith('.conf') && !OWN_FILE.test(f)).sort();
+          break;
+        } catch (e) {
+          // una carpeta que no existe es normal (conf.d); una que existe pero no se puede listar, no
+          if ((e as NodeJS.ErrnoException).code !== 'ENOENT') denied.push(candidate);
+        }
       }
+      if (!dir) continue;
       for (const file of files) {
         found++;
         let text: string;
@@ -97,7 +116,9 @@ export class NginxSitesService {
     // primero los protegidos; dentro de cada grupo, por nombre
     const rank = { full: 0, partial: 1, none: 2 };
     items.sort((a, b) => rank[a.status] - rank[b.status] || a.names[0]!.localeCompare(b.names[0]!));
-    const value = { readable: found === 0 || unreadable < found, dirs, items };
+    // sin acceso = no se encontró ningún vhost y alguna carpeta no se pudo listar, o no se pudo leer ninguno
+    const readable = found === 0 ? denied.length === 0 : unreadable < found;
+    const value = { readable, dirs: readable ? dirs.flat() : denied.length ? denied : dirs.flat(), items };
     if (dirs === SITE_DIRS) this.cache = { at: Date.now(), value };
     return value;
   }

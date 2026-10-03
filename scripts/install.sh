@@ -253,6 +253,7 @@ run install -o root -g root -m 0644 "$SRC_DIR/logrotate/smartguard-nginx" /etc/l
 run install -o root -g root -m 0755 "$SRC_DIR/bin/smartguard" "$SG_CLI"
 run install -o root -g root -m 0750 "$SRC_DIR/scripts/smartguard-fw-sync" "$SG_FWSYNC"
 
+run install -d -o root -g root -m 0755 "$SG_NGXVIEW" "$SG_NGXVIEW/sites-enabled" "$SG_NGXVIEW/conf.d"
 sed "s|^ExecStart=/usr/bin/node |ExecStart=$NODE_BIN |" "$SRC_DIR/systemd/smartguard.service" \
   | write_file /etc/systemd/system/smartguard.service 0644
 run install -o root -g root -m 0644 "$SRC_DIR/systemd/smartguard-cf-ips.service" /etc/systemd/system/smartguard-cf-ips.service
