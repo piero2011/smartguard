@@ -467,12 +467,21 @@ sudo smartguard protect tienda.com otra.com                   # añade la protec
 sudo smartguard protect tienda.com --dry-run                  # solo enseña qué líneas añadiría
 sudo smartguard unprotect tienda.com                          # quita los include de SmartGuard de ese sitio
 sudo smartguard protected                                     # sitios registrados con «protect»
+sudo smartguard backup                                        # copia completa en /root/smartguard-backup-….tar.gz
+sudo smartguard restore /root/smartguard-backup-….tar.gz      # la restaura en este servidor (--keep-env: conserva su .env)
 sudo smartguard update                                        # si hay cambios en GitHub, los descarga e instala
 sudo smartguard update --check                                # solo dice si hay una versión nueva
 cd nueva-version && sudo ./scripts/update.sh                  # lo mismo a mano, desde una copia ya descargada
 sudo /opt/smartguard/scripts/update.sh --revert
 sudo /opt/smartguard/scripts/uninstall.sh [--purge]
 ```
+
+`smartguard backup` empaqueta `/etc/smartguard`, `/etc/nginx/smartguard`, las listas que viven en Redis
+(lista blanca dinámica, bloqueos manuales de IP, bots y redes bloqueados), los vhosts protegidos y una
+copia de todo `/etc/nginx`. `smartguard restore` aplica configuración, fragmentos y listas (con `nginx -t`
+y vuelta atrás si algo falla) y repone la protección en los sitios registrados; **no** sobrescribe
+`/etc/nginx` entero: los vhosts y `nginx-full.tar.gz` van en la copia como referencia. Para llevarlo a
+otro servidor: instalar SmartGuard allí (`install.sh`), copiar el archivo y ejecutar `restore`.
 
 Los sitios añadidos con `smartguard protect` quedan registrados en `/etc/smartguard/protected-sites`.
 CloudPanel guarda su propia copia de cada vhost y reescribe el archivo entero cuando se guarda desde su

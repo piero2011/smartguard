@@ -45,6 +45,14 @@ Uso: sudo smartguard <comando> [args]
   reprotect                   Repone la protección en los sitios registrados con «protect» si su
                               vhost la ha perdido (lo lanza systemd solo cuando CloudPanel reescribe
                               un vhost). «protected» lista los sitios registrados.
+  backup [archivo.tar.gz]     Copia de seguridad completa: configuración (/etc/smartguard), fragmentos de
+                              Nginx, listas guardadas en Redis (lista blanca, bloqueos, bots, redes), los
+                              vhosts protegidos y una copia de todo /etc/nginx. Por defecto en /root.
+  restore <archivo.tar.gz> [--keep-env] [--yes]
+                              Restaura una copia en este servidor (SmartGuard debe estar instalado):
+                              configuración, fragmentos de Nginx y listas; después repone la protección
+                              en los sitios registrados que existan aquí. --keep-env conserva el
+                              smartguard.env de este servidor (Redis, token y secreto propios).
   update [--check] [--force] [--yes]
                               Consulta GitHub y, SOLO si hay cambios, descarga e instala la nueva
                               versión conservando tu configuración. --check: solo avisa.
@@ -331,6 +339,115 @@ JS
         warn "CloudPanel guarda su propia copia de cada vhost: si lo editas y guardas allí, estos cambios se pierden. Actívalo para que se repongan solos: sudo systemctl enable --now smartguard-reprotect.path"
       fi
     fi
+    ;;
+
+  backup)
+    out=${1:-/root/smartguard-backup-$(hostname -s 2>/dev/null || echo vps)-$(date +%Y%m%d-%H%M%S).tar.gz}
+    [[ "$out" == *.tar.gz ]] || die "El archivo debe terminar en .tar.gz"
+    work=$(mktemp -d); b=$work/smartguard-backup
+    install -d -m 0700 "$b"
+    log "Creando copia de seguridad…"
+    cp -a "$SG_ETC" "$b/etc-smartguard"
+    cp -a "$NGX_SG" "$b/nginx-smartguard"
+    install -d "$b/nginx-http" "$b/vhosts"
+    resolve_http_conf 2>/dev/null && [ -f "$NGX_CONFD" ] && cp -a "$NGX_CONFD" "$b/nginx-http/" || true
+    # vhosts de los sitios protegidos, tal como están ahora (referencia para otro servidor)
+    for f in "$NGX_DIR"/sites-enabled/*.conf; do
+      [ -f "$f" ] && grep -qE '^[[:space:]]*include[[:space:]]+[^;#]*smartguard/' "$f" && cp -a "$f" "$b/vhosts/" || true
+    done
+    # todo /etc/nginx (sin los backups anteriores): para recuperar este mismo servidor
+    tar czf "$b/nginx-full.tar.gz" -C /etc --exclude=nginx/backups nginx
+    if curl -fsS --max-time 3 "$API/health" >/dev/null 2>&1; then
+      SG_TOKEN=$(env_get ADMIN_TOKEN) SG_API=$API "$NODE" "$SG_OPT/dist/admin/state-cli.js" export "$b/state.json" \
+        || warn "No se pudieron exportar las listas de Redis; la copia sigue sin ellas."
+    else
+      warn "SmartGuard no responde: la copia NO incluye las listas de Redis (lista blanca, bloqueos, bots, redes)."
+    fi
+    {
+      echo "smartguard-backup 1"
+      echo "fecha=$(date -Is)"
+      echo "servidor=$(hostname -f 2>/dev/null || hostname)"
+      echo "version=$("$NODE" -p "require('$SG_OPT/package.json').version" 2>/dev/null || echo '?')"
+      echo "commit=$(installed_commit)"
+    } >"$b/manifest.txt"
+    (umask 077; tar czf "$out" -C "$work" smartguard-backup)
+    rm -rf "$work"
+    ok "Copia creada: $out ($(du -h "$out" | cut -f1))"
+    warn "Contiene el ADMIN_TOKEN y el secreto de SmartGuard: guárdala como una contraseña."
+    log "Para restaurarla (en este u otro servidor con SmartGuard instalado): sudo smartguard restore $out"
+    ;;
+
+  restore)
+    keepenv=false; in=""
+    for a in "$@"; do
+      case "$a" in
+        --keep-env) keepenv=true ;;
+        --yes|-y) ASSUME_YES=true ;;
+        -*) die "Uso: smartguard restore <archivo.tar.gz> [--keep-env] [--yes]" ;;
+        *) in=$a ;;
+      esac
+    done
+    [ -n "$in" ] && [ -f "$in" ] || die "Uso: smartguard restore <archivo.tar.gz> [--keep-env] [--yes]"
+    work=$(mktemp -d)
+    # solo se aceptan rutas dentro de smartguard-backup/ (nada absoluto ni con ..)
+    if tar tzf "$in" | grep -qE '^/|(^|/)\.\.(/|$)' || ! tar tzf "$in" | grep -q '^smartguard-backup/manifest.txt$'; then
+      rm -rf "$work"; die "El archivo no es una copia de SmartGuard válida."
+    fi
+    tar xzf "$in" -C "$work"
+    b=$work/smartguard-backup
+    head -n1 "$b/manifest.txt" | grep -qx 'smartguard-backup 1' || { rm -rf "$work"; die "Formato de copia desconocido."; }
+    log "Copia: $(sed -n '2,5p' "$b/manifest.txt" | tr '\n' ' ')"
+    [ "$keepenv" = true ] && log "Se conserva el smartguard.env de este servidor (--keep-env)."
+    warn "Se sustituirá la configuración de SmartGuard de este servidor (reglas, sitios, bots, límites, modo) por la de la copia."
+    confirm "¿Restaurar?" || { rm -rf "$work"; die "Cancelado. No se ha cambiado nada."; }
+    # 1) Red de seguridad: copia de lo que hay ahora
+    backup_nginx pre-restore
+    before=$(mktemp -d)
+    cp -a "$SG_ETC" "$before/etc-smartguard"; cp -a "$NGX_SG" "$before/nginx-smartguard"
+    # 2) Configuración y fragmentos de Nginx
+    if [ "$keepenv" = true ]; then cp -a "$SG_ENV" "$work/env.keep"; cp -a "$NGX_SG/secret.conf" "$work/secret.keep" 2>/dev/null || true; fi
+    cp -a "$b/etc-smartguard/." "$SG_ETC/"
+    cp -a "$b/nginx-smartguard/." "$NGX_SG/"
+    if [ "$keepenv" = true ]; then
+      cp -a "$work/env.keep" "$SG_ENV"
+      # el secreto de Nginx debe ser el del .env que se queda
+      [ -f "$work/secret.keep" ] && cp -a "$work/secret.keep" "$NGX_SG/secret.conf"
+    fi
+    chown -R root:smartguard "$SG_ETC"; chmod 0750 "$SG_ETC"; chmod 0640 "$SG_ENV"
+    undo() {
+      warn "Deshaciendo la restauración…"
+      cp -a "$before/etc-smartguard/." "$SG_ETC/"; cp -a "$before/nginx-smartguard/." "$NGX_SG/"
+      nginx -t >/dev/null 2>&1 && systemctl reload nginx
+      systemctl restart smartguard || true
+      rm -rf "$before" "$work"
+    }
+    if ! nginx_safe_reload; then undo; die "Nginx rechazó la configuración restaurada: este servidor queda como estaba."; fi
+    # 3) Servicio con la configuración restaurada
+    systemctl restart smartguard
+    PORT=$(env_get PORT); PORT=${PORT:-3100}; API="http://127.0.0.1:$PORT"
+    up=false; for _ in $(seq 1 20); do curl -fsS "$API/health" >/dev/null 2>&1 && { up=true; break; }; sleep 1; done
+    if [ "$up" != true ]; then undo; die "SmartGuard no arrancó con la configuración restaurada: este servidor queda como estaba. Revisa: journalctl -u smartguard -n 50"; fi
+    # 4) Listas de Redis
+    if [ -f "$b/state.json" ]; then
+      log "Restaurando listas (lista blanca, bloqueos manuales, bots, redes)…"
+      SG_TOKEN=$(env_get ADMIN_TOKEN) SG_API=$API "$NODE" "$SG_OPT/dist/admin/state-cli.js" import "$b/state.json" \
+        || warn "Algunas entradas no se pudieron restaurar (ver arriba)."
+    else
+      warn "La copia no incluía las listas de Redis."
+    fi
+    # 5) Lista blanca → Nginx, y protección de los sitios registrados que existan aquí
+    "$0" nginx-sync || warn "nginx-sync falló; ejecútalo a mano."
+    if [ -s "$SG_PROTECTED" ]; then
+      missing=()
+      while IFS= read -r s; do [ -f "$NGX_DIR/sites-enabled/$s.conf" ] || missing+=("$s"); done <"$SG_PROTECTED"
+      "$0" reprotect || warn "No se pudo reponer la protección en algún sitio."
+      [ ${#missing[@]} -eq 0 ] || warn "Sitios registrados que no existen en este servidor (créalos en CloudPanel y ejecuta «smartguard reprotect»): ${missing[*]}"
+    fi
+    rm -rf "$before"
+    ok "Restauración completada. Comprueba: sudo smartguard status"
+    log "Los vhosts de la copia están en el archivo (carpeta vhosts/) como referencia; el /etc/nginx completo, en nginx-full.tar.gz."
+    log "Si este es OTRO servidor: revisa en $SG_ENV los datos de Redis y la IP del servidor en la lista blanca (sudo smartguard allowlist)."
+    rm -rf "$work"
     ;;
 
   protected)
