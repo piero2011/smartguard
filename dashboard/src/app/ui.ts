@@ -11,14 +11,17 @@ export interface Notice {
   text: Text;
 }
 
-export type Theme = 'light' | 'dark';
+/** auto = el del sistema operativo (Windows, macOS, iOS, Android…), que el navegador comunica a la página */
+export type Theme = 'auto' | 'light' | 'dark';
 const THEME_KEY = 'sg_theme';
+const THEME_ORDER: Theme[] = ['auto', 'light', 'dark'];
 
 function readStoredTheme(): Theme {
   try {
-    return localStorage.getItem(THEME_KEY) === 'dark' ? 'dark' : 'light';
+    const v = localStorage.getItem(THEME_KEY);
+    return v === 'dark' || v === 'light' ? v : 'auto';
   } catch {
-    return 'light';
+    return 'auto';
   }
 }
 
@@ -33,7 +36,7 @@ export class Ui {
   readonly tab = signal<Tab>('manage');
   /** Ventana de tiempo del Resumen, en minutos */
   readonly overviewMinutes = signal(60);
-  /** Tema del panel: claro por defecto; la elección se recuerda en este navegador */
+  /** Tema del panel: el del sistema por defecto; si se fija uno, se recuerda en este navegador */
   readonly theme = signal<Theme>(readStoredTheme());
   readonly eventFilter = signal<EventFilter>('all');
   /** Texto libre de la pestaña Eventos (IP, ruta, regla…) */
@@ -52,15 +55,19 @@ export class Ui {
 
   constructor() {
     effect(() => {
-      document.documentElement.dataset['theme'] = this.theme();
+      // en "auto" no se marca nada: decide la media query prefers-color-scheme del CSS
+      if (this.theme() === 'auto') delete document.documentElement.dataset['theme'];
+      else document.documentElement.dataset['theme'] = this.theme();
     });
   }
 
+  /** Alterna automático → claro → oscuro. */
   toggleTheme(): void {
-    const next: Theme = this.theme() === 'dark' ? 'light' : 'dark';
+    const next = THEME_ORDER[(THEME_ORDER.indexOf(this.theme()) + 1) % THEME_ORDER.length]!;
     this.theme.set(next);
     try {
-      localStorage.setItem(THEME_KEY, next);
+      if (next === 'auto') localStorage.removeItem(THEME_KEY);
+      else localStorage.setItem(THEME_KEY, next);
     } catch {
       /* sin almacenamiento: el tema dura lo que la pestaña */
     }

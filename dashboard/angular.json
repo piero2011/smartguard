@@ -20,7 +20,7 @@
             "baseHref": "/dashboard/",
             "styles": ["src/styles.css"],
             "polyfills": [],
-            "assets": []
+            "assets": [{ "glob": "**/*", "input": "public" }]
           },
           "configurations": {
             "production": {

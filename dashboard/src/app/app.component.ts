@@ -11,7 +11,7 @@ import { AllowlistComponent, BansComponent, BlockedBotsComponent, BlockedNetwork
   template: `
   <header>
     <div class="brand">
-      <span class="logo" aria-hidden="true"></span>
+      <img class="logo" src="favicon.svg" alt="" width="28" height="28">
       <div><strong>{{ 'app.title' | t }}</strong>
         <span class="muted">{{ 'app.subtitle' | t }}</span></div>
     </div>
@@ -26,7 +26,7 @@ import { AllowlistComponent, BansComponent, BlockedBotsComponent, BlockedNetwork
         <option value="es" [selected]="i18n.lang() === 'es'">Español</option>
       </select>
     </label>
-    <button class="small" [attr.aria-label]="'theme.toggle' | t" [title]="'theme.toggle' | t" (click)="ui.toggleTheme()">{{ ui.theme() === 'dark' ? '☀' : '☾' }}</button>
+    <button class="small" [title]="'theme.toggle' | t" (click)="ui.toggleTheme()">{{ ('theme.' + ui.theme()) | t }}</button>
     @if (connected()) {
       <button class="small" (click)="refresh()">{{ 'common.refresh' | t }}</button>
       <button class="small" (click)="logout()">{{ 'auth.logout' | t }}</button>

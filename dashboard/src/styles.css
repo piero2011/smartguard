@@ -1,4 +1,4 @@
-/* Tema claro por defecto (estilo panel de analítica); el oscuro se elige con el botón de la cabecera. */
+/* El tema sigue al sistema (claro u oscuro); el botón de la cabecera permite fijar uno. */
 :root {
   color-scheme: light;
   --bg: #f6f6f7; --fg: #1d1f23; --muted: #6b7280; --card: #fff; --line: #e4e5e9;
@@ -9,6 +9,19 @@
   /* series del gráfico: orden fijo, validado para daltonismo sobre ambas superficies */
   --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --grid: #e9eaee;
 }
+/* Oscuro por el sistema, salvo que se haya fijado el claro… */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0f1318; --fg: #e5e8ed; --muted: #98a2b3; --card: #171c23; --line: #28303c;
+    --accent: #60a5fa; --ok: #4ade80; --ok-bg: #12301f; --warn: #facc15; --warn-bg: #332a0b;
+    --err: #f87171; --err-bg: #3a1414; --neutral-bg: #1e2530;
+    --on-accent: #0b1220; --danger: #f87171; --on-danger: #1a0707;
+    --shadow: none;
+    --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --grid: #232a35;
+  }
+}
+/* …o fijado a mano, aunque el sistema esté en claro */
 :root[data-theme="dark"] {
   color-scheme: dark;
   --bg: #0f1318; --fg: #e5e8ed; --muted: #98a2b3; --card: #171c23; --line: #28303c;
@@ -25,8 +38,7 @@ header { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding
 .brand > div { display: flex; flex-direction: column; line-height: 1.25; }
 .brand strong { font-size: 16px; }
 .brand .muted { font-size: 12px; }
-.logo { width: 28px; height: 28px; border-radius: 8px; background: var(--accent); position: relative; flex: none; }
-.logo::after { content: ''; position: absolute; inset: 7px 9px 6px; border-radius: 3px 3px 8px 8px; background: var(--on-accent); }
+.logo { width: 28px; height: 28px; flex: none; }
 .spacer { flex: 1; }
 /* Pestañas subrayadas, pegadas a la cabecera */
 nav { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; padding: 0 24px; background: var(--card); border-bottom: 1px solid var(--line); }
