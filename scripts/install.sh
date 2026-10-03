@@ -3,8 +3,13 @@
 # SmartGuard — instalador seguro para Debian 13 (punto 85)
 # =============================================================================
 # Uso:  sudo ./scripts/install.sh [--dry-run] [--yes] [--enable-nftables] [--skip-realip]
+#                                [--no-deps] [--upgrade-node]
 #
 # Qué hace (y qué NO hace):
+#   ✔ Instala lo que falte del sistema (apt): curl, tar, openssl, git, redis-tools, Node 22
+#     (NodeSource) y Redis. Pregunta antes; --no-deps lo desactiva. Un Node del sistema anterior
+#     al 22 solo se sube si lo confirmas (o con --upgrade-node): afecta a todo el servidor.
+#     Nginx NO se instala: debe existir ya, con los sitios que se van a proteger.
 #   ✔ Comprueba Node ≥ 22, Nginx (auth_request + realip), Redis, dónde cargar el contexto http
 #   ✔ Backup COMPLETO de /etc/nginx antes de tocar nada
 #   ✔ Crea usuario de sistema "smartguard" (sin shell, sin home real)
@@ -29,19 +34,103 @@ SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 ENABLE_NFT=false
 SKIP_REALIP=false
+NO_DEPS=false
+UPGRADE_NODE=false
 for a in "$@"; do
   case "$a" in
     --dry-run) DRY_RUN=true ;;
     --yes|-y) ASSUME_YES=true ;;
     --enable-nftables) ENABLE_NFT=true ;;
     --skip-realip) SKIP_REALIP=true ;;
-    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+    --no-deps) NO_DEPS=true ;;
+    --upgrade-node) UPGRADE_NODE=true ;;
+    -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
     *) die "Opción desconocida: $a" ;;
   esac
 done
 
 require_root
 trap 'warn "La instalación se interrumpió en la línea $LINENO. Backup: ${BACKUP_PATH:-no creado}"' ERR
+
+# -----------------------------------------------------------------------------
+# 0. Dependencias del sistema: lo que falte se instala (Debian/Ubuntu con apt)
+# -----------------------------------------------------------------------------
+# Paquetes base, Node ≥ 22 (NodeSource) y Redis. Nginx NO se instala: SmartGuard protege sitios que
+# ya sirve Nginx, y montar un servidor web nuevo no es decisión de un instalador.
+# --no-deps lo desactiva; --upgrade-node autoriza subir un Node del sistema anterior al 22.
+APT_UPDATED=false
+apt_install() {
+  if [ "$DRY_RUN" = true ]; then echo "[dry-run] apt-get install -y $*"; return 0; fi
+  if [ "$APT_UPDATED" != true ]; then apt-get update -qq || warn "apt-get update falló; se intenta instalar igualmente"; APT_UPDATED=true; fi
+  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$@"
+}
+
+install_node22() {
+  log "Instalando Node.js 22 desde NodeSource…"
+  if [ "$DRY_RUN" = true ]; then echo "[dry-run] curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y nodejs"; return 0; fi
+  curl -fsSL https://deb.nodesource.com/setup_22.x | bash - || die "No se pudo configurar el repositorio de NodeSource. Instala Node ≥ 22 a mano."
+  APT_UPDATED=true
+  DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs || die "No se pudo instalar nodejs."
+}
+
+ensure_deps() {
+  [ "$NO_DEPS" = true ] && return 0
+  if ! command -v apt-get >/dev/null; then
+    warn "Este sistema no usa apt: instala a mano curl, tar, openssl, git, Node ≥ 22 y Redis si faltan."
+    return 0
+  fi
+  # --- paquetes base
+  local need=() pair
+  for pair in curl:curl tar:tar openssl:openssl git:git redis-cli:redis-tools; do
+    command -v "${pair%%:*}" >/dev/null || need+=("${pair##*:}")
+  done
+  [ -d /etc/ssl/certs ] || need+=(ca-certificates)
+  if [ "$ENABLE_NFT" = true ] && ! command -v nft >/dev/null; then need+=(nftables); fi
+  if [ ${#need[@]} -gt 0 ]; then
+    log "Faltan paquetes del sistema: ${need[*]}"
+    if confirm "¿Instalarlos ahora con apt?"; then apt_install "${need[@]}"; else warn "No se instalan; la instalación fallará en la comprobación correspondiente."; fi
+  fi
+
+  # --- Node ≥ 22 en una ruta del sistema
+  local node major
+  node=$(node_bin); major=$(node_major "$node")
+  case "$node" in
+    ""|/home/*|/root/*)
+      # no hay Node, o solo el de un usuario (nvm): se añade el del sistema, sin tocar el otro
+      [ -n "$node" ] && log "Node está solo en $node (de usuario): el servicio necesita uno del sistema."
+      if confirm "¿Instalar Node.js 22 del sistema (NodeSource)?"; then install_node22; fi
+      ;;
+    *)
+      if [ "$major" -lt 22 ]; then
+        warn "El Node del sistema es v$major y SmartGuard necesita ≥ 22."
+        warn "Subirlo cambia /usr/bin/node para TODO el servidor: revisa antes las aplicaciones que lo usen (PM2, servicios Node propios)."
+        if [ "$UPGRADE_NODE" = true ]; then
+          install_node22
+        elif [ "$ASSUME_YES" = true ]; then
+          die "No se actualiza Node automáticamente con --yes. Repite con --upgrade-node para autorizarlo, o instala Node 22 a mano."
+        elif confirm "¿Actualizar el Node del sistema a la versión 22?"; then
+          install_node22
+        fi
+      fi
+      ;;
+  esac
+
+  # --- Redis local (SmartGuard funciona sin él, pero pierde la memoria al reiniciar)
+  local rh rp
+  rh=$(env_get REDIS_HOST); rh=${rh:-127.0.0.1}
+  rp=$(env_get REDIS_PORT); rp=${rp:-6379}
+  if [ "$rh" = 127.0.0.1 ] || [ "$rh" = localhost ]; then
+    if ! command -v redis-server >/dev/null && ! (command -v redis-cli >/dev/null && redis-cli -h "$rh" -p "$rp" ping 2>/dev/null | grep -q .); then
+      log "No hay un servidor Redis en este equipo."
+      if confirm "¿Instalar Redis (redis-server)?"; then
+        apt_install redis-server
+        run systemctl enable --now redis-server || warn "No se pudo arrancar redis-server"
+      fi
+    fi
+  fi
+}
+
+ensure_deps
 
 # -----------------------------------------------------------------------------
 # 1. Comprobaciones previas
@@ -52,7 +141,8 @@ if [ "${ID:-}" != debian ] || [ "${VERSION_ID:-}" != 13 ]; then
   warn "Probado en Debian 13; detectado: ${PRETTY_NAME:-desconocido}. Continúa bajo tu responsabilidad."
 fi
 
-for bin in curl tar openssl nginx systemctl; do
+command -v nginx >/dev/null || die "Nginx no está instalado. SmartGuard protege sitios que ya sirve Nginx: instala y configura primero Nginx (o CloudPanel) con tus sitios."
+for bin in curl tar openssl systemctl; do
   command -v "$bin" >/dev/null || die "Falta '$bin'. Instálalo: apt-get install -y $bin"
 done
 

@@ -225,8 +225,21 @@ install_dashboard() {
   rm -rf "$tmp"
 }
 
+# Node que usará el servicio. Se prefiere uno del sistema: systemd (ProtectHome) no puede ejecutar
+# el de nvm en /home o /root. Si solo hay uno de usuario, se devuelve ese para que el instalador avise.
 node_bin() {
-  local n
+  local n c
   n=$(command -v node || true)
+  for c in "$n" /usr/bin/node /usr/local/bin/node; do
+    [ -n "$c" ] && [ -x "$c" ] || continue
+    c=$(readlink -f "$c")
+    case "$c" in /home/*|/root/*) continue ;; esac
+    echo "$c"; return 0
+  done
   if [ -n "$n" ]; then readlink -f "$n"; fi
+}
+
+# Versión mayor de un binario de Node (0 si no existe).
+node_major() {
+  [ -n "${1:-}" ] && [ -x "$1" ] && "$1" -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0
 }

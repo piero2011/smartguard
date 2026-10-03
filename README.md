@@ -85,10 +85,13 @@ smartguard/
 | Componente | Versión | Notas |
 |---|---|---|
 | Debian | 13 | probado para Debian 13 (Trixie) |
-| Node.js | ≥ 22 | del sistema (`/usr/bin/node`), no nvm en `/home`. El `nodejs` de apt en Debian 13 es 20.x: usa NodeSource |
-| Nginx | ≥ 1.18 | con `http_auth_request_module` y `http_realip_module` |
+| Node.js | ≥ 22 | del sistema (`/usr/bin/node`), no nvm en `/home`. El `nodejs` de apt en Debian 13 es 20.x: el instalador usa NodeSource |
+| Nginx | ≥ 1.18 | con `http_auth_request_module` y `http_realip_module`. **Debe existir ya**, con los sitios a proteger |
 | Redis | ≥ 6 | opcional en la práctica: sin Redis funciona en memoria (modo degradado) |
 | nftables | cualquiera | opcional |
+
+El instalador comprueba todo esto y **instala lo que falte** (curl, tar, openssl, git, redis-tools,
+Node 22 y Redis) preguntando antes. Nginx es lo único que no instala.
 
 ### Dependencias (y por qué cada una)
 
@@ -105,15 +108,93 @@ No se usan: class-validator/class-transformer ni clases DTO (la validación son 
 `@nestjs/schedule`, `@nestjs/throttler`, helmet (la API es local; el dashboard pone sus cabeceras
 de seguridad y CSP con nonce a mano), ORMs ni SQL.
 
-## 4. Instalación rápida
+## 4. Instalación y primeros pasos
+
+### 4.1 Instalar
+
+En el servidor, como un usuario con `sudo`:
 
 ```bash
-sudo ./scripts/install.sh --dry-run
+sudo apt-get install -y git                       # solo si no tienes git
+git clone https://github.com/piero2011/smartguard.git /tmp/smartguard-src
+cd /tmp/smartguard-src
+sudo ./scripts/install.sh --dry-run               # enseña lo que haría, sin tocar nada
 sudo ./scripts/install.sh
 ```
 
+Qué hace el instalador:
+
+1. **Dependencias.** Si falta algo del sistema lo instala con `apt`, preguntando antes: `curl`, `tar`,
+   `openssl`, `git`, `redis-tools`, **Node.js 22** (NodeSource) y **Redis**.
+   - Si el servidor ya tiene un Node del sistema anterior al 22, avisa de que subirlo afecta a
+     todas las aplicaciones que usen `/usr/bin/node` y solo lo hace si lo confirmas. Con `--yes` no
+     lo sube: hay que añadir `--upgrade-node`.
+   - Si solo hay un Node de usuario (nvm), añade el del sistema sin tocar el otro.
+   - **Nginx no se instala**: SmartGuard protege sitios que ya sirve Nginx (o CloudPanel).
+2. Copia de seguridad completa de `/etc/nginx`.
+3. Instala la aplicación en `/opt/smartguard`, la configuración en `/etc/smartguard` y los
+   fragmentos de Nginx en `/etc/nginx/smartguard`.
+4. Arranca el servicio en modo **AUDIT**: registra lo que bloquearía, pero no bloquea nada.
+
+Opciones de `install.sh`:
+
+| Opción | Efecto |
+|---|---|
+| `--dry-run` | Muestra cada paso sin ejecutarlo |
+| `--yes` | No pregunta (salvo la subida de Node, que exige `--upgrade-node`) |
+| `--no-deps` | No instala dependencias; solo las comprueba |
+| `--upgrade-node` | Autoriza subir a la versión 22 un Node del sistema más antiguo |
+| `--enable-nftables` | Activa además el bloqueo en firewall para conexiones directas |
+| `--skip-realip` | No activa la IP real de Cloudflare (si ya la configuras tú) |
+
+El instalador **no modifica ningún vhost**: hasta el paso 4.3, SmartGuard no ve tráfico.
+
+### 4.2 Permitir tu IP
+
+Antes de proteger nada, añade la IP desde la que administras para no bloquearte a ti mismo:
+
+```bash
+sudo smartguard allow TU_IP ADMIN_ALLOWLIST "Mi IP"
+sudo smartguard nginx-sync
+```
+
+### 4.3 Proteger sitios
+
+```bash
+sudo smartguard protect tienda.com --dry-run      # enseña las líneas que añadiría al vhost
+sudo smartguard protect tienda.com otra.com
+```
+
+El nombre es el del archivo del vhost en `/etc/nginx/sites-enabled/` sin `.conf`. El comando inserta
+los `include` de SmartGuard en su sitio, comprueba con `nginx -t` y recarga; si Nginx los rechaza,
+deja el vhost como estaba. También se puede hacer desde el panel (pestaña **IPs y sitios**: se marcan
+los sitios y el panel da el comando).
+
+### 4.4 Abrir el panel
+
+```bash
+sudo grep '^ADMIN_TOKEN=' /etc/smartguard/smartguard.env | cut -d= -f2-     # el token de acceso
+ssh -L 3100:127.0.0.1:3100 usuario@servidor                                 # desde tu PC
+```
+
+y abrir `http://127.0.0.1:3100/dashboard/`. El panel solo escucha en la propia máquina; para usarlo
+con un dominio hay que ponerle delante un vhost de Nginx con HTTPS que haga proxy a ese puerto.
+
+### 4.5 De AUDIT a ENFORCE
+
+Deja pasar 24–72 horas en AUDIT y revisa qué se habría bloqueado:
+
+```bash
+sudo smartguard report
+```
+
+Si no hay tráfico legítimo entre lo señalado, activa el bloqueo real:
+
+```bash
+sudo smartguard audit off          # ENFORCE.  Volver atrás: sudo smartguard audit on
+```
+
 Procedimiento completo y verificaciones: [docs/02-PROCEDIMIENTOS.md](docs/02-PROCEDIMIENTOS.md).
-El instalador **no modifica vhosts** y deja todo en **AUDIT**.
 
 ## 5. Configuración
 
@@ -338,13 +419,65 @@ acción (ejemplo en docs/02, 14.1).
 
 Las reglas puramente Nginx (bots, rutas prohibidas, límites) siguen activas en todos los casos.
 
-## 12. CLI
+## 12. Comandos
 
-```
-sudo smartguard status | ip <IP> | ban <IP> [1h] [motivo] | unban <IP> | allow <IP/CIDR> [tipo]
-               unallow <IP/CIDR> | bans [--audit] | events [N] | report | rules reload
-               audit on|off|status | killswitch on|off | nginx-sync | nginx-enable | fw-sync | logs
-```
+Todos se ejecutan en el servidor con `sudo`. `sudo smartguard help` muestra esta lista.
+
+**Estado y diagnóstico**
+
+| Comando | Qué hace |
+|---|---|
+| `smartguard status` | Servicio, versión, modo, Redis, bloqueos y tráfico de la última hora |
+| `smartguard version` | Versión y commit instalados |
+| `smartguard ip <IP>` | Explica la puntuación y el estado de una IP: por qué fue bloqueada |
+| `smartguard lookup <valor>` | Dónde está una IP, CIDR, dominio o URL: en qué lista, si está bloqueada |
+| `smartguard events [N]` | Últimos N eventos de seguridad (30 por defecto) |
+| `smartguard bans [--audit]` | Bloqueos activos (o los que se habrían aplicado en AUDIT) |
+| `smartguard report` | Informe de AUDIT: qué se habría bloqueado y posibles falsos positivos |
+| `smartguard logs` | Registro del servicio en vivo |
+
+**Bloquear y permitir**
+
+| Comando | Qué hace |
+|---|---|
+| `smartguard ban <IP> [duración] [motivo]` | Bloqueo manual (`15m`, `1h`, `2d`…; por defecto 1 h) |
+| `smartguard unban <IP> [--keep-score]` | Quita el bloqueo y, por defecto, reinicia su puntuación |
+| `smartguard allow <valor> [tipo] [nota]` | Lista blanca de clientes: IP, CIDR, dominio o `*.dominio`. Tipo: `ADMIN_ALLOWLIST` (por defecto), `SERVICE_ALLOWLIST`, `TRUSTED_NETWORK` |
+| `smartguard allow-host <dominio> [nota]` | Exime un sitio o subdominio destino (SmartGuard no puntúa sus peticiones) |
+| `smartguard unallow <valor>` | Quita una entrada de la lista blanca |
+| `smartguard allowlist` | Muestra la lista blanca completa |
+| `smartguard nginx-sync` | Lleva la lista blanca a Nginx (exime de los límites) y regenera el secreto |
+
+**Sitios**
+
+| Comando | Qué hace |
+|---|---|
+| `smartguard protect <sitio>… [--dry-run] [--yes]` | Añade la protección a esos sitios editando su vhost |
+| `smartguard unprotect <sitio>… [--dry-run] [--yes]` | La quita |
+| `smartguard protected` | Sitios registrados con `protect` |
+| `smartguard reprotect` | Repone la protección en los registrados que la hayan perdido (lo lanza systemd solo cuando CloudPanel reescribe un vhost) |
+
+**Modo y emergencias**
+
+| Comando | Qué hace |
+|---|---|
+| `smartguard audit status` | Modo actual |
+| `smartguard audit on` | AUDIT: solo registra |
+| `smartguard audit off` | ENFORCE: bloquea |
+| `smartguard killswitch on\|off` | Emergencia: Nginx deja de consultar a SmartGuard (los sitios siguen funcionando) |
+| `smartguard rules reload` | Recarga reglas, sitios y bots sin reiniciar |
+| `smartguard nginx-enable` | Reactiva SmartGuard en Nginx tras `rollback-nginx.sh --disable` |
+| `smartguard fw-sync` | Sincroniza los conjuntos de nftables |
+
+**Mantenimiento**
+
+| Comando | Qué hace |
+|---|---|
+| `smartguard update [--check] [--force] [--yes]` | Si hay cambios en GitHub, los descarga e instala conservando la configuración |
+| `smartguard backup [archivo.tar.gz]` | Copia completa: configuración, fragmentos de Nginx, listas de Redis, vhosts protegidos y todo `/etc/nginx` |
+| `smartguard restore <archivo> [--keep-env] [--yes]` | Restaura una copia en este servidor |
+
+Los detalles de `update`, `backup`, `restore` y `protect` están en la sección 16.
 
 ## 13. API local
 
@@ -389,7 +522,26 @@ sudo smartguard status | ip <IP> | ban <IP> [1h] [motivo] | unban <IP> | allow <
 - **Angular 22** standalone + signals, sin zone.js ni librerías de UI (≈56 KB comprimido).
 - **Idioma por defecto: inglés**; selector English/Español en la cabecera (se recuerda en el navegador).
   Todos los mensajes, incluidos los errores del backend, se traducen por su `code`.
-- Pestañas: **Overview · IPs & sites · Blocked · Allowlist · Events**.
+- Pestañas: **Overview · Traffic · IPs & sites · Rules · Blocked · Allowlist · Events · Backup**
+  (en español: Resumen · Tráfico · IPs y sitios · Reglas · Bloqueadas · Lista blanca · Eventos · Copia).
+  - **Resumen**: gráfico de peticiones permitidas, bloqueadas por SmartGuard y detenidas por reglas de
+    Nginx (1 h, 6 h o 24 h), contadores, los "top" de IPs, rutas y reglas, y lo que ocupa SmartGuard
+    en el servidor (versión, memoria, disco, Redis).
+  - **Tráfico**: IPs activas en los últimos 5 minutos y últimas peticiones evaluadas, también las
+    permitidas. Se guarda solo en memoria (300 por sitio).
+  - **IPs y sitios**: consultar, permitir y bloquear; lista de sitios de Nginx con su estado de
+    protección, buscador, y casillas para obtener el comando `smartguard protect`.
+  - **Reglas**: crear, editar, desactivar y borrar reglas propias (se guardan en
+    `/var/lib/smartguard/panel-rules.json` y se aplican al momento); las incluidas, en solo lectura.
+    Una regla que alcanzaría tráfico normal, con una regex insegura o con el id de una incluida se rechaza.
+  - **Bloqueadas** y **Lista blanca**: lo bloqueado (IPs, redes, bots) y lo permitido.
+  - **Eventos**: peticiones sospechosas o bloqueadas, con filtros por tipo, texto y fechas; 50 por página.
+  - **Copia**: exportar a un archivo e importar lo que se gestiona desde el panel (reglas, lista blanca,
+    bloqueos manuales, bots y redes). La copia completa del servidor es `smartguard backup`.
+- Un selector **Sitio**, con buscador, limita Resumen, Tráfico y Eventos a un sitio protegido (con todos
+  sus dominios) o los muestra todos. La pestaña, el sitio y el periodo se guardan en la URL: recargar
+  la página deja al usuario donde estaba.
+- Tema claro u oscuro según el sistema operativo, con un botón para fijar uno.
 - En **IPs & sites**:
   - *Check*: escribes una IP, CIDR, dominio, `*.dominio` o URL y te dice al momento si **ya está en
     una lista y en cuál** (Admin IPs / Services / Trusted networks / Exempt sites, origen .env o
@@ -418,7 +570,8 @@ sudo smartguard status | ip <IP> | ban <IP> [1h] [motivo] | unban <IP> | allow <
 - Seguridad: solo loopback, token en `sessionStorage`, CSP `script-src 'self'` y estilos con nonce
   por petición, sin inline scripts.
 
-Acceso: `ssh -L 3100:127.0.0.1:3100 usuario@vps` y abrir `http://127.0.0.1:3100/dashboard/`.
+Acceso: `ssh -L 3100:127.0.0.1:3100 usuario@vps` y abrir `http://127.0.0.1:3100/dashboard/`
+(el token es el `ADMIN_TOKEN` de `/etc/smartguard/smartguard.env`).
 
 Compilar: `npm run build:dashboard` (o `cd dashboard && npm ci && npx ng build`). `install.sh`/`update.sh`
 usan el build incluido en `dashboard/dist/browser` o lo compilan. Desarrollo:
