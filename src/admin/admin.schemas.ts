@@ -128,6 +128,9 @@ export const RecentQuery = {
 
 export const StatsQuery = {
   minutes: field.optional(field.int({ min: 1, max: 1440 })),
+  /** rango de fechas (ms desde epoch) en lugar de "los últimos N minutos"; sin `to`, hasta ahora */
+  from: EventsQuery.from,
+  to: EventsQuery.to,
   /** solo las cifras de este sitio; sin él, la suma de todos */
   host: hostField(),
 };

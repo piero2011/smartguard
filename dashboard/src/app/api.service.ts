@@ -340,8 +340,10 @@ export class Api {
 
   // --- Endpoints --------------------------------------------------------------
   /** `host`: solo las cifras de ese sitio; vacío = la suma de todos los protegidos. */
-  stats(minutes = 60, host = ''): Promise<Stats> {
-    return this.req('GET', `/admin/stats?minutes=${minutes}${host ? `&host=${encodeURIComponent(host)}` : ''}`);
+  /** `range`: fechas (ms) en lugar de "los últimos N minutos"; sin `to`, hasta ahora. */
+  stats(minutes = 60, host = '', range: { from?: number; to?: number } = {}): Promise<Stats> {
+    const dates = `${range.from === undefined ? '' : `&from=${range.from}`}${range.to === undefined ? '' : `&to=${range.to}`}`;
+    return this.req('GET', `/admin/stats?minutes=${minutes}${dates}${host ? `&host=${encodeURIComponent(host)}` : ''}`);
   }
   mode(): Promise<{ audit: boolean; mode: string; deployment?: 'docker' | 'system' }> {
     return this.req('GET', '/admin/mode');

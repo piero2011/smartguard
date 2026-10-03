@@ -523,7 +523,7 @@ commands do not apply: see [docs/docker.md](docs/docker.md).
 | GET | `/admin/blocked-bots` (bots blocked by name) | token |
 | POST | `/admin/blocked-bots` `{pattern, note?, ttl?}` — text to look for in the User-Agent | token |
 | DELETE | `/admin/blocked-bots?pattern=` | token |
-| GET | `/admin/stats?minutes=&host=` (counters, series and tops; all sites or one) | token |
+| GET | `/admin/stats?minutes=&host=` (or `from=&to=` in ms, last 48 h) (counters, series and tops; all sites or one) | token |
 | GET | `/admin/events?limit=&from=&to=&ip=` (range in ms and IP: searches every stored event) | token |
 | GET | `/admin/events/page?limit=&cursor=&kind=&host=&q=&from=&to=` (cursor pagination; used by the dashboard) | token |
 | GET | `/admin/recent?host=&limit=` (recent traffic and active IPs, in memory) | token |

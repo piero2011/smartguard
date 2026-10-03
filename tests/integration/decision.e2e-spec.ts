@@ -367,6 +367,15 @@ describe('Estadísticas por sitio (API)', () => {
     expect(events.items.length).toBeGreaterThanOrEqual(1);
     expect(events.items.every((e: { host: string }) => e.host === 'otra-tienda.test')).toBe(true);
     expect((await get('/admin/stats?host=No%20Valido')).statusCode).toBe(400);
+    // rango de fechas: el de ahora incluye lo anterior; uno ya pasado no, y uno invertido se rechaza
+    const nowMs = Date.now();
+    const ranged = (await get(`/admin/stats?from=${nowMs - 10 * 60_000}&to=${nowMs}`)).json();
+    expect(ranged.windowMinutes).toBe(11);
+    expect(ranged.totals.requests).toBeGreaterThanOrEqual(all.totals.requests);
+    const past = (await get(`/admin/stats?from=${nowMs - 120 * 60_000}&to=${nowMs - 60 * 60_000}`)).json();
+    expect(past.totals.requests ?? 0).toBe(0);
+    expect(past.to).toBeLessThan(nowMs);
+    expect((await get(`/admin/stats?from=${nowMs}&to=${nowMs - 60 * 60_000}`)).statusCode).toBe(400);
   });
 
   it('tráfico reciente: también las peticiones permitidas, con las IPs activas del sitio', async () => {

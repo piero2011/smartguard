@@ -24,6 +24,8 @@ import { compileSafeRegex } from '../rules/regex-safety';
 import { RuleDef } from '../rules/rule.types';
 
 const MAX_PANEL_RULES = 200;
+/** Minutos de estadísticas que se conservan (TTL de stats:{minuto} y top:* en el almacén: 48 h). */
+const STATS_RETENTION_MIN = 2 * 24 * 60;
 
 /** Peticiones de un visitante normal: una regla del panel que las alcance afectaría a todo el mundo. */
 const NORMAL_SAMPLES: Record<RuleDef['target'] & string, string[]> = {
@@ -310,9 +312,20 @@ export class AdminController {
 
   @Get('stats')
   async stats(@ValidQuery(StatsQuery) q: Infer<typeof StatsQuery>): Promise<unknown> {
-    const minutes = q.minutes ?? 60;
     const now = currentMinute();
-    const mins = Array.from({ length: minutes }, (_, i) => now - minutes + 1 + i);
+    let minutes = q.minutes ?? 60;
+    let end = now;
+    if (q.from !== undefined || q.to !== undefined) {
+      // Rango de fechas: se recorta a lo que se conserva (los contadores por minuto caducan a las 48 h).
+      end = q.to === undefined ? now : Math.min(now, currentMinute(Number(q.to)));
+      const oldest = now - STATS_RETENTION_MIN + 1;
+      const start = Math.max(oldest, q.from === undefined ? end - minutes + 1 : currentMinute(Number(q.from)));
+      if (start > end) {
+        throw new ApiError(400, 'INVALID_RANGE', 'Invalid date range: "from" must be before "to", within the last 48 hours', { from: q.from, to: q.to });
+      }
+      minutes = end - start + 1;
+    }
+    const mins = Array.from({ length: minutes }, (_, i) => end - minutes + 1 + i);
     const hours = [...new Set(mins.map((m) => Math.floor((m * 60) / 3600)))];
     // Un sitio puede tener varios dominios (www, alias): se agrupan bajo su nombre principal.
     const groups = await this.nginxSites.groups();
@@ -348,7 +361,7 @@ export class AdminController {
     const totals: Record<string, number> = {};
     for (const b of buckets) for (const [k, v] of Object.entries(b.fields)) totals[k] = (totals[k] ?? 0) + v;
     // Serie para el gráfico del panel: se agrupa en tramos para que 24 h no sean 1440 puntos.
-    const step = minutes <= 90 ? 1 : minutes <= 360 ? 5 : 15;
+    const step = minutes <= 90 ? 1 : minutes <= 360 ? 5 : minutes <= 1440 ? 15 : 30;
     const grouped = new Map<number, Record<string, number>>();
     for (const b of buckets) {
       const t = Math.floor(b.minute / step) * step * 60_000;
@@ -362,6 +375,9 @@ export class AdminController {
     return {
       mode: this.mode.audit ? 'AUDIT' : 'ENFORCE',
       windowMinutes: minutes,
+      /** periodo realmente devuelto (ms), ya recortado a lo que se conserva */
+      from: mins[0]! * 60_000,
+      to: (end + 1) * 60_000,
       host: q.host ?? '',
       /** sitios con datos en el periodo, del que más tiene al que menos */
       hosts: [...seen.entries()].sort((a, b) => b[1] - a[1]).map(([h]) => h),

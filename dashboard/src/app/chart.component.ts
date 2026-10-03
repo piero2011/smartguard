@@ -146,6 +146,12 @@ export class ChartComponent implements OnDestroy {
   }
 
   private clock(ms: number): string {
-    return new Date(ms).toLocaleTimeString(this.i18n.lang() === 'es' ? 'es-ES' : 'en-US', { hour: '2-digit', minute: '2-digit' });
+    const locale = this.i18n.lang() === 'es' ? 'es-ES' : 'en-US';
+    const t = this.times();
+    // un rango de más de un día repite horas: la etiqueta lleva también el día
+    if (t.length > 1 && t[t.length - 1]! - t[0]! > 24 * 3_600_000) {
+      return new Date(ms).toLocaleString(locale, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    }
+    return new Date(ms).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
   }
 }

@@ -9,6 +9,14 @@ import { ChartComponent, ChartSeries } from './chart.component';
 
 /** Ventanas de tiempo del Resumen, en minutos (1 h, 6 h, 24 h). */
 const RANGES = [60, 360, 1440] as const;
+/** Lo que el servidor conserva de estadísticas por minuto (48 h): más atrás no hay datos. */
+const STATS_RETENTION_MS = 48 * 3_600_000;
+
+/** Fecha en el formato de un <input type="datetime-local"> (hora local, sin segundos). */
+function localInput(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 /** Resumen: gráfico de peticiones en el tiempo, contadores y los "top" con barras. */
 @Component({
@@ -18,10 +26,16 @@ const RANGES = [60, 360, 1440] as const;
   <div class="row toolbar">
     <div class="seg" role="group" [attr.aria-label]="'ov.range' | t">
       @for (r of ranges; track r) {
-        <button [class.active]="ui.overviewMinutes() === r" (click)="ui.overviewMinutes.set(r)">{{ ('ov.range.' + r) | t }}</button>
+        <button [class.active]="!custom() && ui.overviewMinutes() === r" (click)="preset(r)">{{ ('ov.range.' + r) | t }}</button>
       }
     </div>
+    <label>{{ 'ev.from' | t }}
+      <input type="datetime-local" [min]="oldest()" [max]="newest()" [value]="ui.overviewFrom()" (change)="ui.overviewFrom.set($any($event.target).value)"></label>
+    <label>{{ 'ev.to' | t }}
+      <input type="datetime-local" [min]="oldest()" [max]="newest()" [value]="ui.overviewTo()" (change)="ui.overviewTo.set($any($event.target).value)"></label>
+    @if (custom()) { <button class="small" (click)="clearDates()">{{ 'ev.clearDates' | t }}</button> }
   </div>
+  @if (custom()) { <p class="muted sub">{{ 'ov.rangeHint' | t }}</p> }
   @if (ui.site()) { <p class="muted sub">{{ 'site.hint' | t: { site: ui.site() } }}</p> }
   @if (stats(); as s) {
     <div [class.stale]="loading()">
@@ -81,6 +95,11 @@ export class OverviewComponent {
   readonly stats = signal<Stats | null>(null);
   readonly loading = signal(false);
   readonly ranges = RANGES;
+  /** hay un rango de fechas puesto: manda sobre los botones de "última hora / 6 h / 24 h" */
+  readonly custom = computed(() => !!(this.ui.overviewFrom() || this.ui.overviewTo()));
+  /** límites de los selectores de fecha: las estadísticas se conservan 48 h */
+  readonly oldest = computed(() => (this.stats(), localInput(new Date(Date.now() - STATS_RETENTION_MS))));
+  readonly newest = computed(() => (this.stats(), localInput(new Date())));
   /** clave de IP → su User-Agent más reciente (de los eventos), para poder bloquear el bot desde aquí */
   readonly lastUa = signal<Record<string, string>>({});
 
@@ -113,16 +132,30 @@ export class OverviewComponent {
     effect(() => {
       this.ui.changed();
       this.ui.overviewMinutes();
+      this.ui.overviewFrom();
+      this.ui.overviewTo();
       this.ui.site();
       untracked(() => void this.load());
     });
+  }
+
+  /** Un botón de ventana ("última hora"…) quita el rango de fechas. */
+  preset(minutes: number): void {
+    this.clearDates();
+    this.ui.overviewMinutes.set(minutes);
+  }
+
+  clearDates(): void {
+    this.ui.overviewFrom.set('');
+    this.ui.overviewTo.set('');
   }
 
   async load(): Promise<void> {
     // mientras recarga se mantiene lo anterior atenuado: sin saltos de maquetación
     this.loading.set(true);
     try {
-      const s = await this.api.stats(this.ui.overviewMinutes(), this.ui.site());
+      const ms = (v: string) => (v && !Number.isNaN(new Date(v).getTime()) ? new Date(v).getTime() : undefined);
+      const s = await this.api.stats(this.ui.overviewMinutes(), this.ui.site(), { from: ms(this.ui.overviewFrom()), to: ms(this.ui.overviewTo()) });
       this.stats.set(s);
       this.ui.addSites(s.hosts ?? []);
     } catch (e) {

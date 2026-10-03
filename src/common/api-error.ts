@@ -9,6 +9,7 @@ import { HttpException } from '@nestjs/common';
 export type ApiErrorCode =
   | 'VALIDATION'
   | 'INVALID_VALUE'
+  | 'INVALID_RANGE'
   | 'INVALID_IP'
   | 'ALREADY_ALLOWLISTED'
   | 'ALREADY_COVERED'

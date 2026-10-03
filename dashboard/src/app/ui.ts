@@ -33,15 +33,18 @@ const RANGES = [60, 360, 1440];
  * Dónde está el usuario, guardado en el fragmento de la URL (#tab=events&site=tienda.com&range=360)
  * para que recargar la página lo deje en el mismo sitio. Sin fragmento se abre el Resumen.
  */
-function readRoute(): { tab: Tab; site: string; range: number } {
+function readRoute(): { tab: Tab; site: string; range: number; from: string; to: string } {
   const p = new URLSearchParams(location.hash.replace(/^#/, ''));
   const tab = p.get('tab') as Tab;
   const site = (p.get('site') ?? '').toLowerCase();
   const range = Number(p.get('range'));
+  const date = (v: string | null) => (v && /^\d{4}-\d\d-\d\dT\d\d:\d\d$/.test(v) ? v : '');
   return {
     tab: TABS.includes(tab) ? tab : 'overview',
     site: /^[a-z0-9]([a-z0-9.-]{0,98}[a-z0-9])?$/.test(site) ? site : '',
     range: RANGES.includes(range) ? range : 60,
+    from: date(p.get('from')),
+    to: date(p.get('to')),
   };
 }
 
@@ -61,6 +64,9 @@ export class Ui {
   readonly deployment = signal<'docker' | 'system'>('system');
   /** Ventana de tiempo del Resumen, en minutos */
   readonly overviewMinutes = signal(this.route.range);
+  /** Rango de fechas del Resumen (valor de un <input type="datetime-local">); con alguno puesto manda sobre la ventana */
+  readonly overviewFrom = signal(this.route.from);
+  readonly overviewTo = signal(this.route.to);
   /** Tema del panel: el del sistema por defecto; si se fija uno, se recuerda en este navegador */
   readonly theme = signal<Theme>(readStoredTheme());
   readonly eventFilter = signal<EventFilter>('all');
@@ -85,6 +91,8 @@ export class Ui {
       const p = new URLSearchParams({ tab: this.tab() });
       if (this.site()) p.set('site', this.site());
       if (this.overviewMinutes() !== 60) p.set('range', String(this.overviewMinutes()));
+      if (this.overviewFrom()) p.set('from', this.overviewFrom());
+      if (this.overviewTo()) p.set('to', this.overviewTo());
       // replaceState: cambiar de pestaña no llena el historial del navegador
       history.replaceState(null, '', `#${p}`);
     });
@@ -94,6 +102,8 @@ export class Ui {
       this.tab.set(r.tab);
       this.site.set(r.site);
       this.overviewMinutes.set(r.range);
+      this.overviewFrom.set(r.from);
+      this.overviewTo.set(r.to);
     });
     effect(() => {
       // en "auto" no se marca nada: decide la media query prefers-color-scheme del CSS
