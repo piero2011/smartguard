@@ -463,10 +463,17 @@ sudo /opt/smartguard/scripts/rollback-nginx.sh --disable      # neutraliza Smart
 sudo smartguard nginx-enable                                  # deshace lo anterior
 sudo /opt/smartguard/scripts/rollback-nginx.sh --list
 sudo /opt/smartguard/scripts/rollback-nginx.sh --restore /etc/nginx/backups/nginx-….tar.gz
-cd nueva-version && sudo ./scripts/update.sh                  # conserva .env, reglas, sitios, allowlists
+sudo smartguard update                                        # si hay cambios en GitHub, los descarga e instala
+sudo smartguard update --check                                # solo dice si hay una versión nueva
+cd nueva-version && sudo ./scripts/update.sh                  # lo mismo a mano, desde una copia ya descargada
 sudo /opt/smartguard/scripts/update.sh --revert
 sudo /opt/smartguard/scripts/uninstall.sh [--purge]
 ```
+
+`smartguard update` compara el commit instalado (`/opt/smartguard/COMMIT`) con la rama `UPDATE_BRANCH`
+de `UPDATE_REPO`. Si coinciden no hace nada; si no, descarga a `/opt/smartguard-src` y ejecuta
+`update.sh`, que conserva `.env`, reglas, sitios y allowlists y vuelve atrás solo si la nueva versión
+no arranca.
 
 ## 17. Roadmap
 

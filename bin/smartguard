@@ -35,6 +35,11 @@ Uso: sudo smartguard <comando> [args]
   nginx-sync                  Regenera allowlist.conf y secret.conf desde el .env y recarga Nginx
   nginx-enable                Reactiva SmartGuard en Nginx tras rollback-nginx.sh --disable
   fw-sync                     Sincroniza sets nftables (trusted, cloudflare)
+  update [--check] [--force] [--yes]
+                              Consulta GitHub y, SOLO si hay cambios, descarga e instala la nueva
+                              versión conservando tu configuración. --check: solo avisa.
+                              --force: reinstala aunque no haya cambios. Revertir: update.sh --revert
+  version                     Versión y commit instalados
   logs                        journalctl -u smartguard -f
 EOF
 }
@@ -61,6 +66,9 @@ json() { "$NODE" -e 'const a=process.argv.slice(1);const o={};for(let i=0;i<a.le
 valid_ip() { [[ "$1" =~ ^[0-9a-fA-F:.]{2,45}(/[0-9]{1,3})?$ ]] || die "IP/CIDR inválida: $1"; }
 valid_allow() { [[ "$1" =~ ^([0-9a-fA-F:.]{2,45}(/[0-9]{1,3})?|(\*\.)?[A-Za-z0-9.-]{3,253}|https?://[^[:space:]]{3,2000})$ ]] || die "Valor inválido (IP, CIDR, dominio, *.dominio o URL): $1"; }
 
+# Commit de GitHub instalado (lo escribe update.sh/install.sh); "desconocido" en instalaciones antiguas
+installed_commit() { cat "$SG_OPT/COMMIT" 2>/dev/null || echo desconocido; }
+
 current_enforce() { grep -A1 'sg_nginx_enforce' "$NGX_SG/mode.conf" 2>/dev/null | grep -oE 'default [01]' | grep -oE '[01]' || echo 0; }
 current_ks() { grep -A1 'sg_killswitch' "$NGX_SG/mode.conf" 2>/dev/null | grep -oE 'default [01]' | grep -oE '[01]' || echo 0; }
 
@@ -80,6 +88,7 @@ cmd=${1:-help}; shift || true
 case "$cmd" in
   status)
     systemctl --no-pager --lines=0 status smartguard | head -n 3 || true
+    echo "--- versión $("$NODE" -p "require('$SG_OPT/package.json').version" 2>/dev/null || echo '?') ($(installed_commit | cut -c1-7))"
     echo "--- health"; curl -sS --max-time 3 "$API/health" | pretty || warn "SmartGuard no responde (Nginx sigue funcionando en fail-open)"
     echo "--- Nginx: reglas nuevas=$([ "$(current_enforce)" = 1 ] && echo ENFORCE || echo AUDIT) · killswitch=$([ "$(current_ks)" = 1 ] && echo ON || echo off)"
     echo "--- últimos 60 min"
@@ -241,6 +250,48 @@ JS
     ;;
 
   fw-sync) "$SG_FWSYNC" ;;
+
+  version)
+    echo "SmartGuard $("$NODE" -p "require('$SG_OPT/package.json').version") ($(installed_commit))"
+    ;;
+
+  update)
+    check=false; force=false; pass=()
+    for a in "$@"; do
+      case "$a" in
+        --check) check=true ;;
+        --force) force=true ;;
+        --yes|-y) pass+=(--yes) ;;
+        *) die "Uso: smartguard update [--check] [--force] [--yes]" ;;
+      esac
+    done
+    command -v git >/dev/null || die "Falta git (apt-get install -y git)."
+    repo=$(env_get UPDATE_REPO); repo=${repo:-https://github.com/piero2011/smartguard.git}
+    branch=$(env_get UPDATE_BRANCH); branch=${branch:-main}
+    [[ "$branch" =~ ^[A-Za-z0-9._/-]+$ ]] || die "UPDATE_BRANCH inválido: $branch"
+    remote=$(git ls-remote "$repo" "refs/heads/$branch" | cut -f1)
+    [[ "$remote" =~ ^[0-9a-f]{40}$ ]] || die "No se pudo consultar $repo ($branch). ¿Hay red? ¿El repositorio es privado?"
+    installed=$(installed_commit)
+    if [ "$remote" = "$installed" ] && [ "$force" != true ]; then
+      ok "Ya tienes la última versión (${remote:0:7}). Nada que actualizar."
+      exit 0
+    fi
+    log "Hay cambios en GitHub: instalado ${installed:0:7} → disponible ${remote:0:7}"
+    [ "$check" = true ] && exit 0
+    # Copia de trabajo propiedad de root (nunca dentro de directorios que escriba el servicio)
+    if [ -d "$SG_SRC/.git" ]; then
+      git -C "$SG_SRC" remote set-url origin "$repo"
+      git -C "$SG_SRC" fetch --quiet --depth 1 origin "$branch"
+      git -C "$SG_SRC" reset --quiet --hard FETCH_HEAD
+      git -C "$SG_SRC" clean -qfdx
+    else
+      rm -rf "$SG_SRC"
+      git clone --quiet --depth 1 --branch "$branch" "$repo" "$SG_SRC"
+    fi
+    [ "$(git -C "$SG_SRC" rev-parse HEAD)" = "$remote" ] || warn "GitHub cambió durante la descarga; se instala lo descargado."
+    rm -f "$HDR"
+    exec bash "$SG_SRC/scripts/update.sh" "${pass[@]}"
+    ;;
   logs) exec journalctl -u smartguard -f ;;
   help|-h|--help) usage ;;
   *) usage; exit 1 ;;

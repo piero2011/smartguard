@@ -75,6 +75,10 @@ export interface Stats {
   bansActive: number;
   wouldBansActive: number;
   totals: Record<string, number>;
+  /** minutos que agrupa cada punto de `series` */
+  stepMinutes: number;
+  /** contadores por tramo de tiempo (t = inicio del tramo, en ms), de más antiguo a más reciente */
+  series: ({ t: number } & Record<string, number>)[];
   topPaths: { member: string; score: number }[];
   topIps: { member: string; score: number }[];
   topRules: { member: string; score: number }[];

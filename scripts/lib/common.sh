@@ -7,6 +7,8 @@ SG_OPT=/opt/smartguard
 SG_ETC=/etc/smartguard
 SG_ENV=$SG_ETC/smartguard.env
 SG_VAR=/var/lib/smartguard
+# Copia de trabajo de GitHub que usa "smartguard update" (propiedad de root)
+SG_SRC=/opt/smartguard-src
 SG_LOGDIR=/var/log/nginx/smartguard
 NGX_DIR=/etc/nginx
 NGX_SG=$NGX_DIR/smartguard

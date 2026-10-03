@@ -292,6 +292,16 @@ export class AdminController {
     ]);
     const totals: Record<string, number> = {};
     for (const b of buckets) for (const [k, v] of Object.entries(b.fields)) totals[k] = (totals[k] ?? 0) + v;
+    // Serie para el gráfico del panel: se agrupa en tramos para que 24 h no sean 1440 puntos.
+    const step = minutes <= 90 ? 1 : minutes <= 360 ? 5 : 15;
+    const grouped = new Map<number, Record<string, number>>();
+    for (const b of buckets) {
+      const t = Math.floor(b.minute / step) * step * 60_000;
+      const g = grouped.get(t) ?? {};
+      for (const [k, v] of Object.entries(b.fields)) g[k] = (g[k] ?? 0) + v;
+      grouped.set(t, g);
+    }
+    const series = [...grouped.entries()].map(([t, fields]) => ({ t, ...fields }));
     const last = buckets.slice(-5);
     const perMin = (field: string) => Math.round(last.reduce((a, b) => a + (b.fields[field] ?? 0), 0) / Math.max(1, last.length));
     return {
@@ -303,7 +313,8 @@ export class AdminController {
       bansActive,
       wouldBansActive: wouldBans,
       totals,
-      series: buckets.map((b) => ({ t: b.minute * 60_000, ...b.fields })),
+      stepMinutes: step,
+      series,
       topPaths,
       topIps,
       topRules,

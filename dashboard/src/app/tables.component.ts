@@ -5,41 +5,68 @@ import { EventFilter, Ui } from './ui';
 import { IpComponent } from './ipinfo';
 import { BlockButtonsComponent } from './block.component';
 import { PAGE_SIZE, PagerComponent, pageCount, pageOf } from './pager.component';
+import { ChartComponent, ChartSeries } from './chart.component';
 
-/** Resumen: tarjetas + top rutas / IPs / reglas */
+/** Ventanas de tiempo del Resumen, en minutos (1 h, 6 h, 24 h). */
+const RANGES = [60, 360, 1440] as const;
+
+/** Resumen: gráfico de peticiones en el tiempo, contadores y los "top" con barras. */
 @Component({
   selector: 'sg-overview',
-  imports: [TPipe, IpComponent, BlockButtonsComponent],
+  imports: [TPipe, IpComponent, BlockButtonsComponent, ChartComponent],
   template: `
-  @if (stats(); as s) {
-    <div class="cards">
-      @for (c of cards(s); track c.key) {
-        <button type="button" class="stat" [title]="'ov.open' | t" (click)="c.open()"><b>{{ c.value }}</b><span>{{ c.key | t }}</span></button>
+  <div class="row toolbar">
+    <div class="seg" role="group" [attr.aria-label]="'ov.range' | t">
+      @for (r of ranges; track r) {
+        <button [class.active]="ui.overviewMinutes() === r" (click)="ui.overviewMinutes.set(r)">{{ ('ov.range.' + r) | t }}</button>
       }
     </div>
+  </div>
+  @if (stats(); as s) {
+    <div [class.stale]="loading()">
+    <section class="card">
+      <h2>{{ 'ov.chartTitle' | t }}</h2>
+      <p class="muted sub">{{ 'ov.chartHint' | t }}</p>
+      <sg-chart [times]="times()" [series]="series()" />
+    </section>
+    <div class="cards">
+      @for (c of cards(s); track c.key) {
+        <button type="button" class="stat" [title]="'ov.open' | t" (click)="c.open()"><span>{{ c.key | t }}</span><b>{{ c.value }}</b></button>
+      }
+    </div>
+    <h2 class="section">{{ 'ov.topTitle' | t }}</h2>
+    <p class="muted sub">{{ 'ov.topHint' | t }}</p>
     <div class="grid3">
-      <section class="card"><h2>{{ 'ov.topPaths' | t }}</h2>
-        <table><tr><th>{{ 'ov.path' | t }}</th><th class="num">{{ 'ov.hits' | t }}</th></tr>
-          @for (r of s.topPaths; track r.member) {
-            <tr class="link" [title]="'ov.open' | t" (click)="ui.openEvents('all', r.member)"><td><code>{{ r.member }}</code></td><td class="num">{{ r.score }}</td></tr>
-          }
-          @empty { <tr><td colspan="2" class="muted">{{ 'common.none' | t }}</td></tr> }
-        </table></section>
-      <section class="card"><h2>{{ 'ov.topIps' | t }}</h2>
-        <table><tr><th>IP</th><th class="num">{{ 'ov.points' | t }}</th><th></th></tr>
-          @for (r of s.topIps; track r.member) {
-            <tr><td class="ip"><sg-ip [ip]="r.member" /></td><td class="num">{{ r.score }}</td>
-              <td class="actions"><button class="small" (click)="inspect(r.member)">{{ 'common.inspect' | t }}</button>
-                <sg-block [ip]="r.member" [ipKey]="r.member" [userAgent]="lastUa()[r.member] ?? ''" /></td></tr>
-          } @empty { <tr><td colspan="3" class="muted">{{ 'common.none' | t }}</td></tr> }
-        </table></section>
-      <section class="card"><h2>{{ 'ov.topRules' | t }}</h2>
-        <table><tr><th>{{ 'ov.rule' | t }}</th><th class="num">{{ 'ov.hits' | t }}</th></tr>
-          @for (r of s.topRules; track r.member) {
-            <tr class="link" [title]="'ov.open' | t" (click)="ui.openEvents('all', r.member)"><td>{{ r.member }}</td><td class="num">{{ r.score }}</td></tr>
-          }
-          @empty { <tr><td colspan="2" class="muted">{{ 'common.none' | t }}</td></tr> }
-        </table></section>
+      <section class="card"><h3>{{ 'ov.topIps' | t }}</h3>
+        @for (r of s.topIps; track r.member) {
+          <div class="bar-row">
+            <div class="bar-label"><sg-ip [ip]="r.member" /></div>
+            <div class="bar" [title]="r.score + ' ' + ('ov.points' | t)"><span [style.width.%]="pct(r.score, s.topIps)"></span></div>
+            <b class="bar-value">{{ r.score }}</b>
+            <div class="bar-actions"><button class="small" (click)="inspect(r.member)">{{ 'common.inspect' | t }}</button>
+              <sg-block [ip]="r.member" [ipKey]="r.member" [userAgent]="lastUa()[r.member] ?? ''" /></div>
+          </div>
+        } @empty { <p class="muted">{{ 'common.none' | t }}</p> }
+      </section>
+      <section class="card"><h3>{{ 'ov.topPaths' | t }}</h3>
+        @for (r of s.topPaths; track r.member) {
+          <button type="button" class="bar-row link" [title]="'ov.open' | t" (click)="ui.openEvents('all', r.member)">
+            <span class="bar-label"><code>{{ r.member }}</code></span>
+            <span class="bar"><span [style.width.%]="pct(r.score, s.topPaths)"></span></span>
+            <b class="bar-value">{{ r.score }}</b>
+          </button>
+        } @empty { <p class="muted">{{ 'common.none' | t }}</p> }
+      </section>
+      <section class="card"><h3>{{ 'ov.topRules' | t }}</h3>
+        @for (r of s.topRules; track r.member) {
+          <button type="button" class="bar-row link" [title]="'ov.open' | t" (click)="ui.openEvents('all', r.member)">
+            <span class="bar-label">{{ r.member }}</span>
+            <span class="bar"><span [style.width.%]="pct(r.score, s.topRules)"></span></span>
+            <b class="bar-value">{{ r.score }}</b>
+          </button>
+        } @empty { <p class="muted">{{ 'common.none' | t }}</p> }
+      </section>
+    </div>
     </div>
   } @else { <p class="muted">{{ 'common.loading' | t }}</p> }
   `,
@@ -48,21 +75,39 @@ export class OverviewComponent {
   private readonly api = inject(Api);
   readonly ui = inject(Ui);
   readonly stats = signal<Stats | null>(null);
+  readonly loading = signal(false);
+  readonly ranges = RANGES;
   /** clave de IP → su User-Agent más reciente (de los eventos), para poder bloquear el bot desde aquí */
   readonly lastUa = signal<Record<string, string>>({});
+
+  readonly times = computed(() => (this.stats()?.series ?? []).map((p) => p.t));
+  /** Las tres líneas del gráfico: lo evaluado, lo que bloqueó SmartGuard y lo que Nginx paró antes de PHP. */
+  readonly series = computed<ChartSeries[]>(() => {
+    const pts = this.stats()?.series ?? [];
+    return [
+      { key: 'ov.s.requests', values: pts.map((p) => p['requests'] ?? 0) },
+      { key: 'ov.s.blocked', values: pts.map((p) => (p['blocked_403'] ?? 0) + (p['limited_429'] ?? 0)) },
+      { key: 'ov.s.nginx', values: pts.map((p) => p['php_avoided'] ?? 0) },
+    ];
+  });
 
   constructor() {
     effect(() => {
       this.ui.changed();
-      void this.load();
+      this.ui.overviewMinutes();
+      untracked(() => void this.load());
     });
   }
 
   async load(): Promise<void> {
+    // mientras recarga se mantiene lo anterior atenuado: sin saltos de maquetación
+    this.loading.set(true);
     try {
-      this.stats.set(await this.api.stats(60));
+      this.stats.set(await this.api.stats(this.ui.overviewMinutes()));
     } catch (e) {
       this.ui.notify('error', () => this.api.describe(e as ApiErr));
+    } finally {
+      this.loading.set(false);
     }
     try {
       const ua: Record<string, string> = {};
@@ -76,6 +121,12 @@ export class OverviewComponent {
     } catch {
       /* sin eventos no se ofrece "Bloquear bot" en esta tabla */
     }
+  }
+
+  /** Ancho de la barra de una fila, relativo a la mayor de su lista. */
+  pct(score: number, rows: { score: number }[]): number {
+    const max = Math.max(1, ...rows.map((r) => r.score));
+    return Math.max(2, (score / max) * 100);
   }
 
   /** Cada tarjeta abre el detalle de su contador: Eventos (ya filtrados) o Bloqueadas. */

@@ -11,8 +11,9 @@ import { AllowlistComponent, BansComponent, BlockedBotsComponent, BlockedNetwork
   template: `
   <header>
     <div class="brand">
-      <strong>{{ 'app.title' | t }}</strong>
-      <span class="muted">{{ 'app.subtitle' | t }}</span>
+      <span class="logo" aria-hidden="true"></span>
+      <div><strong>{{ 'app.title' | t }}</strong>
+        <span class="muted">{{ 'app.subtitle' | t }}</span></div>
     </div>
     @if (mode(); as m) {
       <span class="pill" [class.audit]="m === 'AUDIT'" [class.enforce]="m === 'ENFORCE'">{{ ('mode.' + m) | t }}</span>
@@ -25,6 +26,7 @@ import { AllowlistComponent, BansComponent, BlockedBotsComponent, BlockedNetwork
         <option value="es" [selected]="i18n.lang() === 'es'">Español</option>
       </select>
     </label>
+    <button class="small" [attr.aria-label]="'theme.toggle' | t" [title]="'theme.toggle' | t" (click)="ui.toggleTheme()">{{ ui.theme() === 'dark' ? '☀' : '☾' }}</button>
     @if (connected()) {
       <button class="small" (click)="refresh()">{{ 'common.refresh' | t }}</button>
       <button class="small" (click)="logout()">{{ 'auth.logout' | t }}</button>

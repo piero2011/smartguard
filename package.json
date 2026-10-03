@@ -1,6 +1,6 @@
 {
   "name": "smartguard",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "description": "SmartGuard: capa de decisión de seguridad para WordPress/WooCommerce/Multisite delante de PHP-FPM (Nginx auth_request + análisis de logs + Redis).",
   "private": true,
   "license": "UNLICENSED",

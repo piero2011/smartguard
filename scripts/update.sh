@@ -65,6 +65,10 @@ run install -d -m 0755 "$STAGE"
 for item in package.json package-lock.json tsconfig.json tsconfig.build.json src config scripts bin nginx nftables systemd logrotate docs README.md .env.example; do
   [ -e "$SRC_DIR/$item" ] && run cp -a "$SRC_DIR/$item" "$STAGE/"
 done
+# Commit instalado: "smartguard update" lo compara con GitHub para saber si hay cambios
+if [ "$DRY_RUN" != true ]; then
+  git -C "$SRC_DIR" rev-parse HEAD >"$STAGE/COMMIT" 2>/dev/null || rm -f "$STAGE/COMMIT"
+fi
 if [ "$DRY_RUN" != true ]; then
   (
     cd "$STAGE"

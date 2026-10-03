@@ -11,6 +11,17 @@ export interface Notice {
   text: Text;
 }
 
+export type Theme = 'light' | 'dark';
+const THEME_KEY = 'sg_theme';
+
+function readStoredTheme(): Theme {
+  try {
+    return localStorage.getItem(THEME_KEY) === 'dark' ? 'dark' : 'light';
+  } catch {
+    return 'light';
+  }
+}
+
 export type Tab = 'overview' | 'manage' | 'blocked' | 'allowlist' | 'events';
 
 /** Filtros de la pestaña Eventos (los fija también cada tarjeta del Resumen al pulsarla). */
@@ -20,6 +31,10 @@ export type EventFilter = 'all' | 'log' | 'suspicious' | 'wouldBlock' | 'blocked
 @Injectable({ providedIn: 'root' })
 export class Ui {
   readonly tab = signal<Tab>('manage');
+  /** Ventana de tiempo del Resumen, en minutos */
+  readonly overviewMinutes = signal(60);
+  /** Tema del panel: claro por defecto; la elección se recuerda en este navegador */
+  readonly theme = signal<Theme>(readStoredTheme());
   readonly eventFilter = signal<EventFilter>('all');
   /** Texto libre de la pestaña Eventos (IP, ruta, regla…) */
   readonly eventQuery = signal('');
@@ -34,6 +49,22 @@ export class Ui {
   /** Panel "¿por qué?" de una IP */
   readonly inspect = signal<{ ip: string; text: string } | null>(null);
   private seq = 0;
+
+  constructor() {
+    effect(() => {
+      document.documentElement.dataset['theme'] = this.theme();
+    });
+  }
+
+  toggleTheme(): void {
+    const next: Theme = this.theme() === 'dark' ? 'light' : 'dark';
+    this.theme.set(next);
+    try {
+      localStorage.setItem(THEME_KEY, next);
+    } catch {
+      /* sin almacenamiento: el tema dura lo que la pestaña */
+    }
+  }
 
   notify(kind: Notice['kind'], text: Text): void {
     const id = ++this.seq;
