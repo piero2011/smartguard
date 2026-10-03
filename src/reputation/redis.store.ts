@@ -57,6 +57,7 @@ export function previousStreamId(id: string): string {
  *  events                  STREAM de eventos                      MAXLEN ~ EVENTS_STREAM_MAXLEN
  *  stats:{minuto}          hash de contadores por minuto          TTL 48 h
  *  hll:ips:{minuto}        HyperLogLog IPs activas (12 KB máx)    TTL 48 h
+ *  hll:ips:{minuto}:h:{host}  lo mismo, por sitio                 TTL 1 h
  *  top:{paths|ips|rules}:{hora}  ZSET recortado a 500             TTL 48 h
  *  cf:{ipKey} / cf:rules   reglas Cloudflare creadas + índice     TTL = ban + 1 d
  *  once:{...}              deduplicación (alertas, CF)            TTL corto
@@ -395,6 +396,12 @@ export class RedisReputationStore implements ReputationStore {
         for (let i = 0; i < ips.length; i += 500) p.pfadd(hk, ...ips.slice(i, i + 500));
         p.expire(hk, 2 * DAY_SEC);
       }
+      // por sitio solo se consultan los últimos minutos ("IPs activas"): caducan en 1 h
+      for (const [host, list] of top.hostIps ?? []) {
+        const hk = this.k(`hll:ips:${minute}:h:${host}`);
+        for (let i = 0; i < list.length; i += 500) p.pfadd(hk, ...list.slice(i, i + 500));
+        p.expire(hk, 3600);
+      }
       // "top" globales y, con sufijo :h:<host>, los de cada sitio
       for (const [scope, maps] of [['', top] as const, ...[...(top.hosts ?? [])].map(([h, m]) => [`:h:${h}`, m] as const)]) {
         for (const kind of ['paths', 'ips', 'rules'] as const) {
@@ -424,9 +431,10 @@ export class RedisReputationStore implements ReputationStore {
     });
   }
 
-  async readActiveIps(minutes: number[]): Promise<number> {
+  async readActiveIps(minutes: number[], hosts?: string[]): Promise<number> {
     if (minutes.length === 0) return 0;
-    return this.redis.run((c) => c.pfcount(...minutes.map((m) => this.k(`hll:ips:${m}`))));
+    const keys = hosts?.length ? minutes.flatMap((m) => hosts.map((h) => this.k(`hll:ips:${m}:h:${h}`))) : minutes.map((m) => this.k(`hll:ips:${m}`));
+    return this.redis.run((c) => c.pfcount(...keys));
   }
 
   async readTop(kind: 'paths' | 'ips' | 'rules', hours: number[], limit: number, host?: string): Promise<{ member: string; score: number }[]> {

@@ -292,7 +292,7 @@ export class AdminController {
     const names = q.host ? (groups.get(q.host) ?? [q.host]) : [];
     const [buckets, activeIps, topPaths, topIps, topRules, bansActive, wouldBans] = await Promise.all([
       this.reputation.call((s) => s.readStats(mins)),
-      this.reputation.call((s) => s.readActiveIps(mins.slice(-5))),
+      this.reputation.call((s) => s.readActiveIps(mins.slice(-5), names)),
       this.readTop('paths', hours, names),
       this.readTop('ips', hours, names),
       this.readTop('rules', hours, names),

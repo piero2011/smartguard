@@ -382,6 +382,8 @@ describe('Estadísticas por sitio (API)', () => {
     expect(all.hosts).not.toContain('www.grupo.test');
     const one = (await get('/admin/stats?minutes=5&host=grupo.test')).json();
     expect(one.totals.requests).toBe(3);
+    // IPs activas del sitio: las 3 que lo visitaron, no las de todo el servidor
+    expect(one.activeIps5m).toBe(3);
     expect(one.topPaths.map((p: { member: string }) => p.member).sort()).toEqual(['/.env', '/.git/config']);
     const events = (await get('/admin/events/page?limit=50&host=grupo.test')).json();
     expect(new Set(events.items.map((e: { host: string }) => e.host))).toEqual(new Set(['grupo.test', 'www.grupo.test']));

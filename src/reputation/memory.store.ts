@@ -96,6 +96,7 @@ export class MemoryReputationStore implements ReputationStore {
   private events: SecurityEvent[] = [];
   private stats = new TtlMap<Record<string, number>>(5_000);
   private tops = new TtlMap<Map<string, number>>(1_000);
+  private hostIps = new TtlMap<Set<string>>(5_000);
   private cf = new TtlMap<{ ruleId: string; expiresAt: number }>(10_000);
   private flags = new TtlMap<boolean>(50_000);
   private audit: boolean | null = null;
@@ -296,6 +297,12 @@ export class MemoryReputationStore implements ReputationStore {
     const cur = this.stats.get(String(minute)) ?? {};
     for (const [k, v] of Object.entries(fields)) cur[k] = (cur[k] ?? 0) + v;
     this.stats.set(String(minute), cur, 2 * DAY);
+    for (const [host, list] of top.hostIps ?? []) {
+      const key = `${minute}:${host}`;
+      const set = this.hostIps.get(key) ?? new Set<string>();
+      for (const ip of list) set.add(ip);
+      this.hostIps.set(key, set, 3_600_000);
+    }
     for (const [scope, maps] of [['', top] as const, ...[...(top.hosts ?? [])].map(([h, m]) => [`:h:${h}`, m] as const)]) {
       for (const kind of ['paths', 'ips', 'rules'] as const) {
         const key = `${kind}:${top.hour}${scope}`;
@@ -308,8 +315,11 @@ export class MemoryReputationStore implements ReputationStore {
   async readStats(minutes: number[]): Promise<StatsBucket[]> {
     return minutes.map((minute) => ({ minute, fields: this.stats.get(String(minute)) ?? {} }));
   }
-  async readActiveIps(): Promise<number> {
-    return this.rep.size;
+  async readActiveIps(minutes: number[] = [], hosts?: string[]): Promise<number> {
+    if (!hosts?.length) return this.rep.size;
+    const seen = new Set<string>();
+    for (const m of minutes) for (const h of hosts) for (const ip of this.hostIps.get(`${m}:${h}`) ?? []) seen.add(ip);
+    return seen.size;
   }
   async readTop(kind: 'paths' | 'ips' | 'rules', hours: number[], limit: number, host?: string): Promise<{ member: string; score: number }[]> {
     const agg = new Map<string, number>();

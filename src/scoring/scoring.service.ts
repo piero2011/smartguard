@@ -144,7 +144,7 @@ export class ScoringService implements OnModuleInit {
 
     if (meta.source === 'decision') {
       this.stats.incr('requests', 1, ctx.rawHost);
-      this.stats.seenIp(ctx.ipKey);
+      this.stats.seenIp(ctx.ipKey, ctx.rawHost);
     }
 
     // --- allowlist / bot verificado: nunca se bloquea, pero se registra lo anómalo ------------

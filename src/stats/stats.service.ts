@@ -20,6 +20,8 @@ export class StatsService implements OnModuleInit, OnModuleDestroy {
   private topRules = new Map<string, number>();
   /** los mismos "top", por sitio */
   private hostTops = new Map<string, TopMaps>();
+  /** IPs vistas en cada sitio */
+  private hostIps = new Map<string, Set<string>>();
   /** sitios vistos en este volcado (acotado: el Host lo elige quien hace la petición) */
   private hosts = new Set<string>();
   /** dominios de los sitios protegidos según Nginx; null = no se pudo leer (se acepta cualquiera, acotado) */
@@ -87,8 +89,16 @@ export class StatsService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  seenIp(ipKey: string): void {
-    if (this.ips.size < StatsService.MAX_IPS_BUFFER) this.ips.add(ipKey);
+  seenIp(ipKey: string, host?: string): void {
+    if (this.ips.size >= StatsService.MAX_IPS_BUFFER) return;
+    this.ips.add(ipKey);
+    const site = this.siteName(host);
+    if (site) {
+      this.hosts.add(site);
+      let set = this.hostIps.get(site);
+      if (!set) this.hostIps.set(site, (set = new Set()));
+      set.add(ipKey);
+    }
   }
 
   attack(ipKey: string, path: string, ruleIds: string[], points: number, host?: string): void {
@@ -120,7 +130,7 @@ export class StatsService implements OnModuleInit, OnModuleDestroy {
     const minute = this.minute;
     const fields = this.fields;
     const ips = [...this.ips];
-    const top = { hour: Math.floor((minute * 60) / 3600), paths: this.topPaths, ips: this.topIps, rules: this.topRules, hosts: this.hostTops };
+    const top = { hour: Math.floor((minute * 60) / 3600), paths: this.topPaths, ips: this.topIps, rules: this.topRules, hosts: this.hostTops, hostIps: new Map([...this.hostIps].map(([h, set]): [string, string[]] => [h, [...set]])) };
     const events = this.events;
     this.minute = currentMinute();
     this.fields = {};
@@ -129,10 +139,11 @@ export class StatsService implements OnModuleInit, OnModuleDestroy {
     this.topIps = new Map();
     this.topRules = new Map();
     this.hostTops = new Map();
+    this.hostIps = new Map();
     this.hosts = new Set();
     this.events = [];
     try {
-      if (Object.keys(fields).length || ips.length || top.paths.size) {
+      if (Object.keys(fields).length || ips.length || top.paths.size || top.hostIps.size) {
         await this.reputation.call((s) => s.flushStats(minute, fields, ips, top));
       }
       if (events.length) await this.reputation.call((s) => s.pushEvents(events, this.config.env.eventsStreamMaxLen));

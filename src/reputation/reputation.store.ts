@@ -200,7 +200,8 @@ export interface ReputationStore {
 
   flushStats(minute: number, fields: Record<string, number>, ips: string[], top: TopIncrements): Promise<void>;
   readStats(minutes: number[]): Promise<StatsBucket[]>;
-  readActiveIps(minutes: number[]): Promise<number>;
+  /** IPs distintas vistas en esos minutos; con `hosts`, solo en esos dominios (unión). */
+  readActiveIps(minutes: number[], hosts?: string[]): Promise<number>;
   /** `host`: solo lo de ese sitio; sin él, la suma de todos. */
   readTop(kind: 'paths' | 'ips' | 'rules', hours: number[], limit: number, host?: string): Promise<{ member: string; score: number }[]>;
 
@@ -223,6 +224,8 @@ export interface TopIncrements extends TopMaps {
   hour: number;
   /** los mismos "top", separados por sitio (host de la petición) */
   hosts?: Map<string, TopMaps>;
+  /** IPs vistas en cada sitio, para contar las IPs activas por sitio */
+  hostIps?: Map<string, string[]>;
 }
 
 /** Prefijo de los contadores por sitio dentro del hash de cada minuto: "h:<host>:<campo>". */

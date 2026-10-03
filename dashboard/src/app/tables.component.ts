@@ -158,7 +158,7 @@ export class OverviewComponent {
     return [
       { key: 'ov.decisions', value: s.requestsPerMin, open: ev('all') },
       { key: 'ov.logLines', value: s.logLinesPerMin, open: ev('log') },
-      { key: 'ov.activeIps', value: s.activeIps5m, open: ev('all'), global: true },
+      { key: 'ov.activeIps', value: s.activeIps5m, open: ev('all') },
       { key: 'ov.bans', value: s.bansActive, open: () => this.ui.openBans(false), global: true },
       { key: 'ov.wouldBans', value: s.wouldBansActive, open: () => this.ui.openBans(true), global: true },
       { key: 'ov.suspicious', value: t['action_observe'] ?? 0, open: ev('suspicious') },
