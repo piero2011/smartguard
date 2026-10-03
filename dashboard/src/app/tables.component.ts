@@ -2,7 +2,7 @@ import { Component, computed, effect, inject, signal } from '@angular/core';
 import { AllowList, Api, ApiErr, BanRecord, BlockedBot, SecurityEvent, Stats } from './api.service';
 import { I18n, TPipe } from './i18n';
 import { EventFilter, Ui } from './ui';
-import { IpComponent, IpInfoStore } from './ipinfo';
+import { IpComponent } from './ipinfo';
 
 /** Resumen: tarjetas + top rutas / IPs / reglas */
 @Component({
@@ -374,19 +374,24 @@ const EVENT_FILTERS: Record<EventFilter, (e: SecurityEvent) => boolean> = {
       </div>
     </div>
     <div class="scroll"><table>
-      <tr><th>{{ 'ev.time' | t }}</th><th>{{ 'ev.action' | t }}</th><th>IP</th><th>{{ 'ev.country' | t }}</th><th>{{ 'ev.host' | t }}</th>
-        <th>{{ 'ev.method' | t }}</th><th>{{ 'ev.uri' | t }}</th><th>{{ 'ev.status' | t }}</th><th>{{ 'ev.category' | t }}</th>
+      <tr><th>{{ 'ev.time' | t }}</th><th>{{ 'ev.action' | t }}</th><th>IP</th><th>{{ 'ev.host' | t }}</th>
+        <th>{{ 'ev.request' | t }}</th><th>{{ 'ev.status' | t }}</th><th>{{ 'ev.category' | t }}</th>
         <th class="num">{{ 'ev.delta' | t }}</th><th>{{ 'ev.reason' | t }}</th><th></th></tr>
       @for (e of shown(); track $index) {
-        <tr [title]="e.userAgent ?? ''"><td>{{ i18n.date(e.timestamp) }}</td><td>{{ e.action }}</td><td class="ip"><sg-ip [ip]="e.ip" /></td><td>{{ e.country || ipinfo.get(e.ip)?.country || '' }}</td>
-          <td>{{ e.host }}</td><td>{{ e.method }}</td><td><code>{{ e.uri }}</code></td><td>{{ e.status ?? '' }}</td>
-          <td>{{ e.category }}</td><td class="num">{{ e.scoreDelta }}</td><td>{{ e.reason }}</td>
+        <tr><td class="when">{{ i18n.date(e.timestamp) }}</td>
+          <td class="nowrap"><span class="act" [class.bad]="isBlock(e)" [class.warn]="isWarn(e)">{{ e.action }}</span></td>
+          <td class="ip"><sg-ip [ip]="e.ip" [country]="e.country ?? ''" /></td>
+          <td class="nowrap">{{ e.host }}</td>
+          <td class="uri"><code [title]="e.method + ' ' + e.uri">{{ e.method }} {{ e.uri }}</code>
+            @if (e.userAgent) { <span class="ua" [title]="e.userAgent">{{ e.userAgent }}</span> }</td>
+          <td>{{ e.status ?? '' }}</td><td class="nowrap">{{ e.category }}</td><td class="num">{{ e.scoreDelta }}</td>
+          <td class="reason">{{ e.reason }}</td>
           <td class="actions">
             <button class="small" (click)="inspect(e.ip)">{{ 'common.inspect' | t }}</button>
             <button class="small danger" (click)="blockIp(e)">{{ 'ev.blockIp' | t }}</button>
             @if (e.userAgent) { <button class="small danger" (click)="blockBot(e)">{{ 'ev.blockBot' | t }}</button> }
           </td></tr>
-      } @empty { <tr><td colspan="12" class="muted">{{ 'common.none' | t }}</td></tr> }
+      } @empty { <tr><td colspan="10" class="muted">{{ 'common.none' | t }}</td></tr> }
     </table></div>
   </section>
   `,
@@ -396,7 +401,6 @@ export class EventsComponent {
   readonly ui = inject(Ui);
   readonly i18n = inject(I18n);
   readonly events = signal<SecurityEvent[]>([]);
-  readonly ipinfo = inject(IpInfoStore);
   readonly filters: EventFilter[] = ['all', 'log', 'suspicious', 'wouldBlock', 'blocked', 'limited', 'st403', 'st429', 'denied'];
 
   /** Eventos que pasan el filtro elegido y el texto buscado (IP, ruta, motivo, host o User-Agent). */
@@ -421,6 +425,14 @@ export class EventsComponent {
     } catch (e) {
       this.ui.notify('error', () => this.api.describe(e as ApiErr));
     }
+  }
+
+  /** Bloqueada de verdad (BLOCK / RATE_LIMIT) frente a "se habría bloqueado" en AUDIT (WOULD_BLOCK…). */
+  isBlock(e: SecurityEvent): boolean {
+    return e.action === 'BLOCK' || e.action === 'RATE_LIMIT';
+  }
+  isWarn(e: SecurityEvent): boolean {
+    return e.action === 'WOULD_BLOCK' || e.action === 'WOULD_RATE_LIMIT';
   }
 
   /** Bloquea la IP del evento 24 h: vale para todas sus peticiones siguientes, también en AUDIT. */

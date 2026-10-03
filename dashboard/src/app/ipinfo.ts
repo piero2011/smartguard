@@ -55,17 +55,25 @@ export class IpInfoStore {
     <code>{{ ip() }}</code>
     @if (info(); as i) {
       <span class="ipinfo" [title]="tooltip(i)">
-        {{ i.country }}{{ i.country && i.org ? ' · ' : '' }}{{ i.org }}
+        {{ where(i) }}
         @if (i.cloudflare) { <span class="tag cf">Cloudflare</span> }
         @else if (i.hosting) { <span class="tag">{{ 'ip.hosting' | t }}</span> }
       </span>
+    } @else if (country()) {
+      <span class="ipinfo">{{ country() }}</span>
     }
   `,
 })
 export class IpComponent {
   private readonly store = inject(IpInfoStore);
   readonly ip = input.required<string>();
+  /** País del visitante según Cloudflare (CF-IPCountry); tiene prioridad sobre el de registro de la red. */
+  readonly country = input('');
   readonly info = computed(() => this.store.get(this.ip()));
+
+  where(i: IpInfo): string {
+    return [this.country() || i.country, i.org].filter(Boolean).join(' · ');
+  }
 
   constructor() {
     effect(() => this.store.want(this.ip()));
