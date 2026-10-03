@@ -358,6 +358,8 @@ describe('Estadísticas por sitio (API)', () => {
     expect(all.hosts).toEqual(expect.arrayContaining(['otra-tienda.test', 'orleansembroidery.com']));
     expect(one.host).toBe('otra-tienda.test');
     expect(one.totals.requests).toBe(2);
+    // desglose por sitio en la vista de todos
+    expect(all.sites.find((s: { site: string }) => s.site === 'otra-tienda.test').totals.requests).toBe(2);
     expect(all.totals.requests).toBeGreaterThan(one.totals.requests);
     // en la respuesta no quedan campos con el prefijo interno por sitio
     expect(Object.keys(all.totals).some((k) => k.startsWith('h:'))).toBe(false);

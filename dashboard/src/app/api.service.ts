@@ -77,6 +77,8 @@ export interface Stats {
   totals: Record<string, number>;
   /** sitios con datos en el periodo */
   hosts: string[];
+  /** contadores del periodo de cada sitio protegido, del que más peticiones tiene al que menos */
+  sites?: { site: string; totals: Record<string, number> }[];
   /** minutos que agrupa cada punto de `series` */
   stepMinutes: number;
   /** contadores por tramo de tiempo (t = inicio del tramo, en ms), de más antiguo a más reciente */

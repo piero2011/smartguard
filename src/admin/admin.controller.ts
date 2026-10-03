@@ -344,6 +344,8 @@ export class AdminController {
     // Cada minuto guarda los contadores globales y, con prefijo "h:<host>:", los de cada sitio.
     // Aquí se deja en cada tramo solo lo pedido (un sitio o el total) y se anota qué sitios tienen datos.
     const seen = new Map<string, number>();
+    // contadores del periodo de cada sitio protegido (también los que no han tenido tráfico)
+    const perSite = new Map<string, Record<string, number>>([...groups.keys()].map((s): [string, Record<string, number>] => [s, {}]));
     for (const b of buckets) {
       const kept: Record<string, number> = {};
       for (const [k, v] of Object.entries(b.fields)) {
@@ -352,6 +354,9 @@ export class AdminController {
           const host = k.slice(HOST_FIELD_PREFIX.length, cut);
           const site = primaryOf.get(host) ?? host;
           seen.set(site, (seen.get(site) ?? 0) + v);
+          const st = perSite.get(site) ?? {};
+          st[k.slice(cut + 1)] = (st[k.slice(cut + 1)] ?? 0) + v;
+          perSite.set(site, st);
           // con un sitio elegido se suman los contadores de todos sus dominios
           if (names.includes(host)) kept[k.slice(cut + 1)] = (kept[k.slice(cut + 1)] ?? 0) + v;
         } else if (!q.host) kept[k] = v;
@@ -381,6 +386,10 @@ export class AdminController {
       host: q.host ?? '',
       /** sitios con datos en el periodo, del que más tiene al que menos */
       hosts: [...seen.entries()].sort((a, b) => b[1] - a[1]).map(([h]) => h),
+      /** desglose por sitio (sumando sus dominios), del que más peticiones tiene al que menos */
+      sites: [...perSite.entries()]
+        .map(([site, t]) => ({ site, totals: t }))
+        .sort((a, b) => (b.totals['requests'] ?? 0) - (a.totals['requests'] ?? 0) || a.site.localeCompare(b.site)),
       requestsPerMin: perMin('requests'),
       logLinesPerMin: perMin('log_lines'),
       activeIps5m: activeIps,

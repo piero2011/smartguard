@@ -41,6 +41,25 @@ const OWN_FILE = /^(\d+-)?smartguard\.conf$/;
 const MAX_FILE_BYTES = 512 * 1024;
 const TTL_MS = 60_000;
 
+/**
+ * Huella de las carpetas de vhosts (nombre, tamaño y fecha de cada .conf). Si cambia, la lectura
+ * guardada ya no vale: así «smartguard protect» se ve en el panel al momento, sin esperar al TTL.
+ */
+async function signature(dirs: string[][]): Promise<string> {
+  const parts: string[] = [];
+  for (const dir of dirs.flat()) {
+    try {
+      for (const f of (await fs.readdir(dir)).filter((n) => n.endsWith('.conf')).sort()) {
+        const st = await fs.stat(path.join(dir, f)).catch(() => null);
+        parts.push(`${dir}/${f}:${st ? `${st.size}:${st.mtimeMs}` : '?'}`);
+      }
+    } catch (e) {
+      parts.push(`${dir}:${(e as NodeJS.ErrnoException).code ?? '?'}`);
+    }
+  }
+  return parts.join('|');
+}
+
 /** Nombre principal de un sitio: el de su archivo de vhost si es uno de sus dominios; si no, el más corto. */
 export function primaryName(file: string, names: string[]): string {
   const base = file.replace(/\.conf$/, '').toLowerCase();
@@ -73,12 +92,13 @@ export function parseVhost(text: string): ParsedVhost {
  */
 @Injectable()
 export class NginxSitesService {
-  private cache: { at: number; value: { readable: boolean; dirs: string[]; items: NginxSite[] } } | null = null;
+  private cache: { at: number; dirs: string[][]; sig: string; value: { readable: boolean; dirs: string[]; items: NginxSite[] } } | null = null;
 
   constructor(private readonly allowlist: AllowlistService) {}
 
   async list(dirs: string[][] = SITE_DIRS): Promise<{ readable: boolean; dirs: string[]; items: NginxSite[] }> {
-    if (this.cache && Date.now() - this.cache.at < TTL_MS && dirs === SITE_DIRS) return this.withExempt(this.cache.value);
+    const sig = await signature(dirs);
+    if (this.cache && Date.now() - this.cache.at < TTL_MS && this.cache.dirs === dirs && this.cache.sig === sig) return this.withExempt(this.cache.value);
     const items: NginxSite[] = [];
     let found = 0;
     let unreadable = 0;
@@ -128,7 +148,7 @@ export class NginxSitesService {
     // sin acceso = no se encontró ningún vhost y alguna carpeta no se pudo listar, o no se pudo leer ninguno
     const readable = found === 0 ? denied.length === 0 : unreadable < found;
     const value = { readable, dirs: readable ? dirs.flat() : denied.length ? denied : dirs.flat(), items };
-    if (dirs === SITE_DIRS) this.cache = { at: Date.now(), value };
+    this.cache = { at: Date.now(), dirs, sig, value };
     return this.withExempt(value);
   }
 

@@ -51,6 +51,19 @@ describe('Sitios de Nginx protegidos', () => {
     expect(await svc.groups()).toEqual(new Map());
     await fs.rm(dir, { recursive: true });
   });
+
+  it('un vhost que cambia se ve en la siguiente consulta, sin esperar a que caduque la lectura guardada', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'sg-sites-'));
+    const file = path.join(dir, 'api.shop.test.conf');
+    await fs.writeFile(file, COMMENTED);
+    const svc = new NginxSitesService({ hostAllowed: () => false } as never);
+    const dirs = [[dir]];
+    expect((await svc.list(dirs)).items.map((s) => s.status)).toEqual(['none']);
+    // lo que hace «smartguard protect»: reescribe el vhost con los include
+    await fs.writeFile(file, PROTECTED);
+    expect((await svc.list(dirs)).items.map((s) => s.status)).toEqual(['full']);
+    await fs.rm(dir, { recursive: true });
+  });
 });
 
 describe('Sitios de Nginx: permisos', () => {

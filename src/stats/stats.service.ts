@@ -52,7 +52,8 @@ export class StatsService implements OnModuleInit, OnModuleDestroy {
     this.timer = setInterval(() => void this.flush(), 10_000);
     this.timer.unref();
     void this.refreshKnownHosts();
-    this.sitesTimer = setInterval(() => void this.refreshKnownHosts(), 60_000);
+    // cada 10 s: un sitio recién protegido («smartguard protect») empieza a contar enseguida
+    this.sitesTimer = setInterval(() => void this.refreshKnownHosts(), 10_000);
     this.sitesTimer.unref();
   }
 

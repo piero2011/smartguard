@@ -51,6 +51,20 @@ function localInput(d: Date): string {
           <span>{{ c.key | t }}@if (c.global && ui.site()) { · {{ 'site.allShort' | t }} }</span><b>{{ c.value }}</b></button>
       }
     </div>
+    @if (!ui.site() && bySite().length) {
+      <h2 class="section">{{ 'ov.sitesTitle' | t }}</h2>
+      <p class="muted sub">{{ 'ov.sitesHint' | t }}</p>
+      <section class="card"><div class="scroll"><table>
+        <tr><th>{{ 'site.label' | t }}</th><th class="num">{{ 'ov.sitesTotal' | t }}</th><th class="num">{{ 'ov.s.allowed' | t }}</th>
+          <th class="num">{{ 'ov.s.blocked' | t }}</th><th class="num">{{ 'ov.s.nginx' | t }}</th><th class="num">{{ 'ov.sitesStopped' | t }}</th></tr>
+        @for (r of bySite(); track r.site) {
+          <tr class="link" [title]="'ov.open' | t" (click)="ui.site.set(r.site)">
+            <td>{{ r.site }}</td><td class="num">{{ r.total }}</td><td class="num">{{ r.allowed }}</td>
+            <td class="num">{{ r.blocked }}</td><td class="num">{{ r.nginx }}</td><td class="num">{{ r.pct }}%</td>
+          </tr>
+        }
+      </table></div></section>
+    }
     <h2 class="section">{{ 'ov.topTitle' | t }}</h2>
     <p class="muted sub">{{ 'ov.topHint' | t }}</p>
     <div class="grid3">
@@ -120,6 +134,16 @@ export class OverviewComponent {
       { key: 'ov.s.nginx', values: pts.map((p) => Math.max(0, (p['php_avoided'] ?? 0) - blocked(p))) },
     ];
   });
+  /** Desglose por sitio (vista de todos los sitios), con el mismo reparto que el gráfico. */
+  readonly bySite = computed(() =>
+    (this.stats()?.sites ?? []).map(({ site, totals: t }) => {
+      const blocked = (t['blocked_403'] ?? 0) + (t['limited_429'] ?? 0);
+      const allowed = Math.max(0, (t['requests'] ?? 0) - blocked);
+      const nginx = Math.max(0, (t['php_avoided'] ?? 0) - blocked);
+      const total = allowed + blocked + nginx;
+      return { site, allowed, blocked, nginx, total, pct: total ? Math.round(((blocked + nginx) / total) * 100) : 0 };
+    }),
+  );
   /** Cifra principal: cuánto se detuvo antes de llegar a WordPress, sobre el total del periodo. */
   readonly summary = computed(() => {
     const [allowed, blocked, nginx] = this.series().map((s) => s.values.reduce((a, b) => a + b, 0));
