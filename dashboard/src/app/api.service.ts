@@ -238,13 +238,21 @@ export class Api {
   bans(audit: boolean): Promise<{ total: number; items: BanRecord[] }> {
     return this.req('GET', `/admin/bans?audit=${audit}&limit=500`);
   }
-  /** Con `query` el servidor busca en todos los eventos guardados (rango de fechas en ms y/o IP). */
-  events(limit = 100, query: { from?: number; to?: number; ip?: string } = {}): Promise<SecurityEvent[]> {
-    const p = new URLSearchParams({ limit: String(limit) });
-    if (query.from !== undefined) p.set('from', String(query.from));
-    if (query.to !== undefined) p.set('to', String(query.to));
-    if (query.ip) p.set('ip', query.ip);
-    return this.req('GET', `/admin/events?${p}`);
+  events(limit = 100): Promise<SecurityEvent[]> {
+    return this.req('GET', `/admin/events?limit=${limit}`);
+  }
+  /**
+   * Una página de eventos; el servidor filtra (tipo, texto, fechas en ms) sobre todos los guardados.
+   * Puede traer menos de `limit` con `next` no nulo: quedan eventos por revisar a partir de ese cursor.
+   */
+  eventsPage(q: { limit: number; cursor?: string; kind?: string; q?: string; from?: number; to?: number }): Promise<{ items: SecurityEvent[]; next: string | null }> {
+    const p = new URLSearchParams({ limit: String(q.limit) });
+    if (q.cursor) p.set('cursor', q.cursor);
+    if (q.kind && q.kind !== 'all') p.set('kind', q.kind);
+    if (q.q) p.set('q', q.q);
+    if (q.from !== undefined) p.set('from', String(q.from));
+    if (q.to !== undefined) p.set('to', String(q.to));
+    return this.req('GET', `/admin/events/page?${p}`);
   }
   allowlist(): Promise<AllowList> {
     return this.req('GET', '/admin/allow');

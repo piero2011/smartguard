@@ -1,4 +1,4 @@
-import { Component, computed, effect, inject, signal } from '@angular/core';
+import { Component, OnDestroy, computed, effect, inject, signal, untracked } from '@angular/core';
 import { AllowList, Api, ApiErr, BanRecord, BlockedBot, BlockedNetwork, SecurityEvent, Stats, isPermanent } from './api.service';
 import { I18n, TPipe } from './i18n';
 import { EventFilter, Ui } from './ui';
@@ -66,7 +66,7 @@ export class OverviewComponent {
     try {
       const ua: Record<string, string> = {};
       // los eventos llegan del más reciente al más antiguo: se queda el primero de cada IP
-      for (const e of await this.api.events(1000)) {
+      for (const e of await this.api.events(300)) {
         if (!e.userAgent) continue;
         ua[e.ipKey ?? e.ip] ??= e.userAgent;
         ua[e.ip] ??= e.userAgent;
@@ -399,30 +399,18 @@ export class BlockedBotsComponent {
   }
 }
 
-/** Qué eventos muestra cada filtro. La acción llega como BLOCK o, en AUDIT, WOULD_BLOCK. */
-const EVENT_FILTERS: Record<EventFilter, (e: SecurityEvent) => boolean> = {
-  all: () => true,
-  log: (e) => e.source === 'analyzer',
-  suspicious: (e) => (e.action ?? '').endsWith('OBSERVE'),
-  wouldBlock: (e) => e.action === 'WOULD_BLOCK' || e.action === 'WOULD_RATE_LIMIT',
-  blocked: (e) => e.action === 'BLOCK',
-  limited: (e) => e.action === 'RATE_LIMIT',
-  st403: (e) => e.status === 403,
-  st429: (e) => e.status === 429,
-  denied: (e) => e.source === 'analyzer' && [403, 404, 429, 444].includes(e.status ?? 0),
-};
+/** Eventos por página y máximo de peticiones encadenadas para llenar una (cada una revisa un tramo acotado). */
+const EVENTS_PAGE_SIZE = 50;
+const EVENTS_MAX_ROUNDS = 8;
 
-/** IPv4 completa, o IPv6 (con su prefijo opcional, p. ej. la clave "2001:db8::/64"). */
-const FULL_IP = /^(?:\d{1,3}(?:\.\d{1,3}){3}|(?=[0-9a-f:]*:[0-9a-f:]*:)[0-9a-f:]{3,39}(?:\/\d{1,3})?)$/;
-
-/** Eventos de seguridad recientes */
+/** Eventos de seguridad: una página cada vez; filtros, búsqueda y fechas los resuelve el servidor. */
 @Component({
   selector: 'sg-events',
   imports: [TPipe, IpComponent, BlockButtonsComponent],
   template: `
   <section class="card">
     <div class="row between">
-      <h2>{{ 'ev.title' | t }} ({{ shown().length }} / {{ events().length }})</h2>
+      <h2>{{ 'ev.title' | t }}</h2>
       <div class="row">
         <select [attr.aria-label]="'ev.filter' | t" (change)="ui.eventFilter.set($any($event.target).value)">
           @for (f of filters; track f) { <option [value]="f" [selected]="ui.eventFilter() === f">{{ ('ev.f.' + f) | t }}</option> }
@@ -437,13 +425,12 @@ const FULL_IP = /^(?:\d{1,3}(?:\.\d{1,3}){3}|(?=[0-9a-f:]*:[0-9a-f:]*:)[0-9a-f:]
         <input type="datetime-local" [value]="ui.eventTo()" (change)="ui.eventTo.set($any($event.target).value)"></label>
       <button class="small" (click)="today()">{{ 'ev.today' | t }}</button>
       @if (ui.eventFrom() || ui.eventTo()) { <button class="small" (click)="clearDates()">{{ 'ev.clearDates' | t }}</button> }
-      <span class="muted">{{ (searching() ? 'ev.scopeSearch' : 'ev.scopeRecent') | t: { max: limit } }}</span>
     </div>
     <div class="scroll"><table>
       <tr><th>{{ 'ev.time' | t }}</th><th>{{ 'ev.action' | t }}</th><th>IP</th><th>{{ 'ev.host' | t }}</th>
         <th>{{ 'ev.request' | t }}</th><th>{{ 'ev.status' | t }}</th><th>{{ 'ev.category' | t }}</th>
         <th class="num">{{ 'ev.delta' | t }}</th><th>{{ 'ev.reason' | t }}</th><th></th></tr>
-      @for (e of shown(); track $index) {
+      @for (e of events(); track $index) {
         <tr><td class="when">{{ i18n.date(e.timestamp) }}</td>
           <td class="nowrap"><span class="act" [class.bad]="isBlock(e)" [class.warn]="isWarn(e)">{{ e.action }}</span></td>
           <td class="ip"><sg-ip [ip]="e.ip" [country]="e.country ?? ''" /></td>
@@ -456,60 +443,104 @@ const FULL_IP = /^(?:\d{1,3}(?:\.\d{1,3}){3}|(?=[0-9a-f:]*:[0-9a-f:]*:)[0-9a-f:]
             <button class="small" (click)="inspect(e.ip)">{{ 'common.inspect' | t }}</button>
             <sg-block [ip]="e.ip" [ipKey]="e.ipKey ?? ''" [userAgent]="e.userAgent ?? ''" />
           </td></tr>
-      } @empty { <tr><td colspan="10" class="muted">{{ 'common.none' | t }}</td></tr> }
+      } @empty { <tr><td colspan="10" class="muted">{{ (loading() ? 'ev.loading' : 'common.none') | t }}</td></tr> }
     </table></div>
+    <div class="row between">
+      <span class="muted">{{ 'ev.page' | t: { page: page(), count: events().length } }}@if (loading()) { · {{ 'ev.loading' | t }} }</span>
+      <div class="row">
+        <button class="small" [disabled]="page() === 1 || loading()" (click)="first()">{{ 'ev.first' | t }}</button>
+        <button class="small" [disabled]="page() === 1 || loading()" (click)="prev()">{{ 'ev.prev' | t }}</button>
+        <button class="small" [disabled]="!next() || loading()" (click)="forward()">{{ 'ev.next' | t }}</button>
+      </div>
+    </div>
   </section>
   `,
 })
-export class EventsComponent {
+export class EventsComponent implements OnDestroy {
   private readonly api = inject(Api);
   readonly ui = inject(Ui);
   readonly i18n = inject(I18n);
   readonly events = signal<SecurityEvent[]>([]);
   readonly filters: EventFilter[] = ['all', 'log', 'suspicious', 'wouldBlock', 'blocked', 'limited', 'st403', 'st429', 'denied'];
-
-  readonly limit = 1000;
+  readonly loading = signal(false);
+  /** cursor con el que se pidió cada página ya visitada ('' = la primera, los eventos más recientes) */
+  private readonly cursors = signal<string[]>(['']);
+  /** cursor de la página siguiente (null = no hay más) */
+  readonly next = signal<string | null>(null);
+  readonly page = computed(() => this.cursors().length);
+  /** Texto buscado, con retardo: no se consulta al servidor en cada pulsación. */
+  private readonly query = signal(this.ui.eventQuery().trim());
+  private typing: ReturnType<typeof setTimeout> | null = null;
+  private filterKey = '';
   private loadSeq = 0;
-
-  /** Si el texto buscado es una IP completa (o una clave /64), la búsqueda la hace el servidor. */
-  readonly ipQuery = computed(() => {
-    const q = this.ui.eventQuery().trim().toLowerCase();
-    return FULL_IP.test(q) ? q : '';
-  });
-  /** Con IP o fechas el servidor busca en todos los eventos guardados, no solo en los últimos. */
-  readonly searching = computed(() => !!(this.ipQuery() || this.ui.eventFrom() || this.ui.eventTo()));
-
-  /** Eventos que pasan el filtro elegido y el texto buscado (IP, ruta, motivo, host o User-Agent). */
-  readonly shown = computed(() => {
-    const match = EVENT_FILTERS[this.ui.eventFilter()];
-    const q = this.ui.eventQuery().trim().toLowerCase();
-    return this.events().filter(
-      (e) =>
-        match(e) &&
-        (!q || [e.ip, e.ipKey ?? '', e.uri, e.reason, e.host, e.category, e.userAgent ?? ''].some((v) => String(v ?? '').toLowerCase().includes(q))),
-    );
-  });
 
   constructor() {
     effect(() => {
-      this.ui.changed();
-      this.ipQuery();
-      this.ui.eventFrom();
-      this.ui.eventTo();
-      void this.load();
+      const q = this.ui.eventQuery().trim();
+      if (this.typing) clearTimeout(this.typing);
+      this.typing = setTimeout(() => this.query.set(q), 350);
     });
+    effect(() => {
+      this.ui.changed();
+      const key = JSON.stringify([this.ui.eventFilter(), this.query(), this.ui.eventFrom(), this.ui.eventTo()]);
+      untracked(() => {
+        if (key !== this.filterKey) {
+          this.filterKey = key;
+          this.cursors.set(['']);
+          void this.load();
+        } else if (this.page() === 1) {
+          // el refresco periódico solo trae eventos nuevos: las páginas anteriores no cambian
+          void this.load();
+        }
+      });
+    });
+  }
+
+  ngOnDestroy(): void {
+    if (this.typing) clearTimeout(this.typing);
   }
 
   async load(): Promise<void> {
     const seq = ++this.loadSeq;
     const ms = (v: string) => (v && !Number.isNaN(new Date(v).getTime()) ? new Date(v).getTime() : undefined);
+    const base = { kind: this.ui.eventFilter(), q: this.query(), from: ms(this.ui.eventFrom()), to: ms(this.ui.eventTo()) };
+    this.loading.set(true);
     try {
-      const events = await this.api.events(this.limit, { from: ms(this.ui.eventFrom()), to: ms(this.ui.eventTo()), ip: this.ipQuery() || undefined });
-      // una respuesta antigua no debe pisar a la de una búsqueda posterior
-      if (seq === this.loadSeq) this.events.set(events);
+      const items: SecurityEvent[] = [];
+      let cursor: string | null = this.cursors()[this.cursors().length - 1] || null;
+      // Con filtros el servidor revisa un tramo acotado por petición: se encadenan hasta llenar la página.
+      for (let round = 0; round < EVENTS_MAX_ROUNDS; round++) {
+        const r = await this.api.eventsPage({ ...base, limit: EVENTS_PAGE_SIZE - items.length, cursor: cursor ?? undefined });
+        // una respuesta antigua no debe pisar a la de una búsqueda posterior
+        if (seq !== this.loadSeq) return;
+        items.push(...r.items);
+        cursor = r.next;
+        if (!cursor || items.length >= EVENTS_PAGE_SIZE) break;
+      }
+      this.events.set(items);
+      this.next.set(cursor);
     } catch (e) {
-      this.ui.notify('error', () => this.api.describe(e as ApiErr));
+      if (seq === this.loadSeq) this.ui.notify('error', () => this.api.describe(e as ApiErr));
+    } finally {
+      if (seq === this.loadSeq) this.loading.set(false);
     }
+  }
+
+  first(): void {
+    this.cursors.set(['']);
+    void this.load();
+  }
+
+  prev(): void {
+    this.cursors.update((c) => (c.length > 1 ? c.slice(0, -1) : c));
+    void this.load();
+  }
+
+  forward(): void {
+    const n = this.next();
+    if (!n) return;
+    this.cursors.update((c) => [...c, n]);
+    void this.load();
   }
 
   /** Desde las 00:00 de hoy (hora del navegador) hasta ahora. */

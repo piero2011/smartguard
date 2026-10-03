@@ -96,7 +96,8 @@ export class AppComponent implements OnInit, OnDestroy {
   async ngOnInit(): Promise<void> {
     if (this.api.token()) await this.verify();
     this.timer = setInterval(() => {
-      if (this.connected() && this.tab() !== 'manage') this.refresh();
+      // con la pestaña del navegador en segundo plano no se consulta nada
+      if (this.connected() && this.tab() !== 'manage' && !document.hidden) this.refresh();
     }, 30_000);
   }
 

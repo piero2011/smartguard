@@ -12,7 +12,7 @@ import { ParsedIp, ipKey, parseIp } from '../common/ip.util';
 import { formatDuration, parseDuration } from '../common/uri.util';
 import { currentMinute } from '../stats/stats.service';
 import { AllowValueParam, Infer, IpParam, ValidBody, ValidQuery } from '../common/validation';
-import { AllowBody, BanBody, BotBody, BotQuery, EventsQuery, IpInfoQuery, ListQuery, LookupQuery, ModeBody, NetworkBody, NetworkQuery, StatsQuery, UnbanQuery } from './admin.schemas';
+import { AllowBody, BanBody, BotBody, BotQuery, EventsPageQuery, EventsQuery, IpInfoQuery, ListQuery, LookupQuery, ModeBody, NetworkBody, NetworkQuery, StatsQuery, UnbanQuery } from './admin.schemas';
 import { BlocklistService } from '../blocklist/blocklist.service';
 import { IpInfoService } from '../ipinfo/ipinfo.service';
 import { ApiError } from '../common/api-error';
@@ -316,6 +316,17 @@ export class AdminController {
     const filtered = q.from !== undefined || q.to !== undefined || q.ip !== undefined;
     const query = { from: q.from === undefined ? undefined : Number(q.from), to: q.to === undefined ? undefined : Number(q.to), ip: q.ip };
     return this.reputation.call((s) => s.listEvents(q.limit ?? 100, filtered ? query : undefined));
+  }
+
+  @Get('events/page')
+  async eventsPage(@ValidQuery(EventsPageQuery) q: Infer<typeof EventsPageQuery>): Promise<unknown> {
+    const query = {
+      from: q.from === undefined ? undefined : Number(q.from),
+      to: q.to === undefined ? undefined : Number(q.to),
+      kind: q.kind,
+      text: q.q?.toLowerCase() || undefined,
+    };
+    return this.reputation.call((s) => s.pageEvents(q.limit ?? 50, query, q.cursor));
   }
 
   @Get('rules')

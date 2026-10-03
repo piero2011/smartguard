@@ -1,4 +1,5 @@
 import { field } from '../common/validation';
+import { EVENT_KINDS } from '../reputation/reputation.store';
 
 /**
  * Esquemas declarativos de la API admin (se aplican con @ValidBody / @ValidQuery).
@@ -82,6 +83,17 @@ export const EventsQuery = {
   to: field.optional(field.string({ pattern: /^\d{1,14}$/, message: 'must be a timestamp in milliseconds' })),
   /** IP exacta o clave de reputación (un /64 de IPv6) */
   ip: field.optional(field.ipOrCidr()),
+};
+
+/** Página de eventos del panel (cursor en lugar de offset: el stream crece por delante mientras se pagina). */
+export const EventsPageQuery = {
+  limit: field.optional(field.int({ min: 1, max: 200 })),
+  cursor: field.optional(field.string({ pattern: /^\d{1,15}-\d{1,20}$/, message: 'invalid cursor' })),
+  from: EventsQuery.from,
+  to: EventsQuery.to,
+  kind: field.optional(field.enum(EVENT_KINDS)),
+  /** texto libre: IP, ruta, motivo, host, categoría o User-Agent */
+  q: field.optional(field.string({ max: 100 })),
 };
 
 export const StatsQuery = {

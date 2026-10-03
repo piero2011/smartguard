@@ -6,6 +6,7 @@ import {
   ApplyResult,
   BlockedBot,
   BlockedNetwork,
+  EventPage,
   EventQuery,
   IpState,
   ReputationStore,
@@ -15,6 +16,7 @@ import {
   MAX_BAN_SEC,
   banIndexMember,
   eventMatches,
+  eventQueryIsEmpty,
 } from './reputation.store';
 
 const DAY_SEC = 86_400;
@@ -23,6 +25,12 @@ const TOP_KEEP = 500;
 const EVENT_SCAN_PAGE = 1_000;
 const EVENT_SCAN_PAGES = 100;
 const EVENT_ID_SLACK_MS = 3_600_000;
+/**
+ * Paginación del panel: con filtros se leen lotes de EVENT_PAGE_BATCH y como mucho EVENT_PAGE_SCAN_MAX
+ * eventos por petición, para que una búsqueda nunca retenga el proceso que decide las peticiones.
+ */
+const EVENT_PAGE_BATCH = 500;
+const EVENT_PAGE_SCAN_MAX = 5_000;
 
 /** ID inmediatamente anterior a uno del stream ("ms-seq"), para paginar hacia atrás sin repetirlo. */
 export function previousStreamId(id: string): string {
@@ -298,35 +306,67 @@ export class RedisReputationStore implements ReputationStore {
   }
 
   async listEvents(limit: number, query?: EventQuery): Promise<SecurityEvent[]> {
-    if (!query) return this.readEvents('+', '-', limit).then((r) => r.events);
-    // El ID del stream es la hora de inserción, algo posterior a la del evento (el analizador lee
-    // el log con retraso): se acota el stream con margen y se filtra por la hora real del evento.
-    const start = query.from !== undefined ? String(Math.max(0, query.from - EVENT_ID_SLACK_MS)) : '-';
-    let end = query.to !== undefined ? String(query.to + EVENT_ID_SLACK_MS) : '+';
+    if (!query) return (await this.readEvents('+', '-', limit)).flatMap((r) => (r.event ? [r.event] : []));
+    const [start, first] = this.eventRange(query);
+    let end = first;
     const out: SecurityEvent[] = [];
     for (let page = 0; page < EVENT_SCAN_PAGES && out.length < limit; page++) {
-      const { events, lastId, rows } = await this.readEvents(end, start, EVENT_SCAN_PAGE);
-      for (const e of events) if (out.length < limit && eventMatches(e, query)) out.push(e);
-      if (rows < EVENT_SCAN_PAGE || !lastId) break;
-      end = previousStreamId(lastId);
+      const rows = await this.readEvents(end, start, EVENT_SCAN_PAGE);
+      for (const { event } of rows) if (event && out.length < limit && eventMatches(event, query)) out.push(event);
+      if (rows.length < EVENT_SCAN_PAGE) break;
+      end = previousStreamId(rows[rows.length - 1]!.id);
     }
     return out;
   }
 
-  private async readEvents(end: string, start: string, count: number): Promise<{ events: SecurityEvent[]; lastId: string | null; rows: number }> {
+  /** El cursor es el ID del stream del último evento revisado. */
+  async pageEvents(limit: number, query: EventQuery, cursor?: string): Promise<EventPage> {
+    const [start, first] = this.eventRange(query);
+    let end = cursor ? previousStreamId(cursor) : first;
+    // sin filtros todo evento vale: basta leer exactamente los que se piden
+    const batch = eventQueryIsEmpty(query) ? limit : EVENT_PAGE_BATCH;
+    const items: SecurityEvent[] = [];
+    let last: string | null = null;
+    for (let scanned = 0; scanned < EVENT_PAGE_SCAN_MAX; ) {
+      const rows = await this.readEvents(end, start, batch);
+      for (const { id, event } of rows) {
+        scanned++;
+        if (event && eventMatches(event, query)) items.push(event);
+        if (items.length >= limit) return { items, next: id };
+      }
+      if (rows.length < batch) return { items, next: null };
+      last = rows[rows.length - 1]!.id;
+      end = previousStreamId(last);
+    }
+    return { items, next: last };
+  }
+
+  /**
+   * Tramo [inicio, fin] del stream para un rango de fechas. El ID del stream es la hora de inserción,
+   * algo posterior a la del evento (el analizador lee el log con retraso): se acota con margen y
+   * luego se filtra por la hora real del evento.
+   */
+  private eventRange(query: EventQuery): [start: string, end: string] {
+    return [
+      query.from !== undefined ? String(Math.max(0, query.from - EVENT_ID_SLACK_MS)) : '-',
+      query.to !== undefined ? String(query.to + EVENT_ID_SLACK_MS) : '+',
+    ];
+  }
+
+  private async readEvents(end: string, start: string, count: number): Promise<{ id: string; event: SecurityEvent | null }[]> {
     const rows = await this.redis.run((c) => c.xrevrange(this.k('events'), end, start, 'COUNT', count));
-    const events: SecurityEvent[] = [];
-    for (const [, fields] of rows) {
+    return rows.map(([id, fields]) => {
       const i = fields.indexOf('e');
+      let event: SecurityEvent | null = null;
       if (i >= 0 && fields[i + 1]) {
         try {
-          events.push(JSON.parse(fields[i + 1]!) as SecurityEvent);
+          event = JSON.parse(fields[i + 1]!) as SecurityEvent;
         } catch {
           /* ignorar */
         }
       }
-    }
-    return { events, lastId: rows.length ? rows[rows.length - 1]![0] : null, rows: rows.length };
+      return { id, event };
+    });
   }
 
   async flushStats(minute: number, fields: Record<string, number>, ips: string[], top: TopIncrements): Promise<void> {

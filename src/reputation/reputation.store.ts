@@ -84,17 +84,51 @@ export interface BlockedNetwork {
   fetchedAt: number;
 }
 
-/** Filtro del listado de eventos: rango por la hora del evento (ms) y/o IP (o su clave, p. ej. un /64). */
+/** Tipos de evento por los que filtra el panel. La acción llega como BLOCK o, en AUDIT, WOULD_BLOCK. */
+export const EVENT_KINDS = ['all', 'log', 'suspicious', 'wouldBlock', 'blocked', 'limited', 'st403', 'st429', 'denied'] as const;
+export type EventKind = (typeof EVENT_KINDS)[number];
+
+const KIND_MATCH: Record<EventKind, (e: SecurityEvent) => boolean> = {
+  all: () => true,
+  log: (e) => e.source === 'analyzer',
+  suspicious: (e) => (e.action ?? '').endsWith('OBSERVE'),
+  wouldBlock: (e) => e.action === 'WOULD_BLOCK' || e.action === 'WOULD_RATE_LIMIT',
+  blocked: (e) => e.action === 'BLOCK',
+  limited: (e) => e.action === 'RATE_LIMIT',
+  st403: (e) => e.status === 403,
+  st429: (e) => e.status === 429,
+  denied: (e) => e.source === 'analyzer' && [403, 404, 429, 444].includes(e.status ?? 0),
+};
+
+/**
+ * Filtro del listado de eventos: rango por la hora del evento (ms), IP exacta (o su clave, p. ej.
+ * un /64), tipo de evento y texto libre (en minúsculas) buscado en IP, ruta, motivo, host, categoría y UA.
+ */
 export interface EventQuery {
   from?: number;
   to?: number;
   ip?: string;
+  kind?: EventKind;
+  text?: string;
 }
 
 export function eventMatches(e: SecurityEvent, q: EventQuery): boolean {
   if (q.from !== undefined && e.timestamp < q.from) return false;
   if (q.to !== undefined && e.timestamp > q.to) return false;
-  return !q.ip || e.ip === q.ip || e.ipKey === q.ip;
+  if (q.ip && e.ip !== q.ip && e.ipKey !== q.ip) return false;
+  if (q.kind && !KIND_MATCH[q.kind](e)) return false;
+  if (!q.text) return true;
+  return [e.ip, e.ipKey, e.uri, e.reason, e.host, e.category, e.userAgent].some((v) => String(v ?? '').toLowerCase().includes(q.text!));
+}
+
+export function eventQueryIsEmpty(q: EventQuery): boolean {
+  return q.from === undefined && q.to === undefined && !q.ip && !q.text && (!q.kind || q.kind === 'all');
+}
+
+/** Una página de eventos. `next` es el cursor para pedir la siguiente (null = no hay más). */
+export interface EventPage {
+  items: SecurityEvent[];
+  next: string | null;
 }
 
 export interface StatsBucket {
@@ -143,6 +177,11 @@ export interface ReputationStore {
   pushEvents(events: SecurityEvent[], maxLen: number): Promise<void>;
   /** Del más reciente al más antiguo. Con `query` busca en TODO lo almacenado, no solo en lo último. */
   listEvents(limit: number, query?: EventQuery): Promise<SecurityEvent[]>;
+  /**
+   * Página de eventos a partir de un cursor. Con filtros recorre una cantidad ACOTADA de eventos por
+   * llamada: puede devolver menos de `limit` con `next` no nulo (quedan eventos por revisar).
+   */
+  pageEvents(limit: number, query: EventQuery, cursor?: string): Promise<EventPage>;
 
   flushStats(minute: number, fields: Record<string, number>, ips: string[], top: TopIncrements): Promise<void>;
   readStats(minutes: number[]): Promise<StatsBucket[]>;

@@ -5,6 +5,7 @@ import {
   ApplyResult,
   BlockedBot,
   BlockedNetwork,
+  EventPage,
   EventQuery,
   IpState,
   ReputationStore,
@@ -276,6 +277,16 @@ export class MemoryReputationStore implements ReputationStore {
   }
   async listEvents(limit: number, query?: EventQuery): Promise<SecurityEvent[]> {
     return (query ? this.events.filter((e) => eventMatches(e, query)) : this.events).slice(0, limit);
+  }
+  /** El cursor es la posición del último evento revisado ("N-0", con la forma de un ID de stream). */
+  async pageEvents(limit: number, query: EventQuery, cursor?: string): Promise<EventPage> {
+    const items: SecurityEvent[] = [];
+    for (let i = cursor ? Number(cursor.split('-')[0]) + 1 : 0; i < this.events.length; i++) {
+      if (!eventMatches(this.events[i]!, query)) continue;
+      items.push(this.events[i]!);
+      if (items.length >= limit) return { items, next: i + 1 < this.events.length ? `${i}-0` : null };
+    }
+    return { items, next: null };
   }
   async flushStats(minute: number, fields: Record<string, number>, _ips: string[], top: TopIncrements): Promise<void> {
     const cur = this.stats.get(String(minute)) ?? {};
