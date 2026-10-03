@@ -23,6 +23,7 @@ RUN npx ng build
 FROM node:22-bookworm-slim
 ARG GIT_COMMIT=""
 ENV NODE_ENV=production \
+    SMARTGUARD_DEPLOYMENT=docker \
     PORT=3100 \
     CONFIG_DIR=/etc/smartguard \
     ANALYZER_STATE_FILE=/var/lib/smartguard/analyzer.state \

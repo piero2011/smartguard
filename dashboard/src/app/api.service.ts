@@ -183,6 +183,7 @@ export interface NginxSites {
 /** Versión instalada y lo que ocupa SmartGuard en el servidor */
 export interface SystemInfo {
   version: string;
+  deployment?: 'docker' | 'system';
   commit: string;
   node: string;
   uptimeSec: number;
@@ -342,7 +343,7 @@ export class Api {
   stats(minutes = 60, host = ''): Promise<Stats> {
     return this.req('GET', `/admin/stats?minutes=${minutes}${host ? `&host=${encodeURIComponent(host)}` : ''}`);
   }
-  mode(): Promise<{ audit: boolean; mode: string }> {
+  mode(): Promise<{ audit: boolean; mode: string; deployment?: 'docker' | 'system' }> {
     return this.req('GET', '/admin/mode');
   }
   setMode(audit: boolean): Promise<{ audit: boolean; mode: string }> {

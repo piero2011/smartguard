@@ -83,15 +83,19 @@ export function importSteps(s: SavedState, now = Date.now()): Step[] {
 
   <section class="card">
     <h2>{{ 'bk.fullTitle' | t }}</h2>
-    <p class="muted">{{ 'bk.fullHint' | t }}</p>
-    <pre class="snippet">sudo smartguard backup
+    @if (ui.deployment() === 'docker') {
+      <p class="muted">{{ 'bk.fullDocker' | t }}</p>
+    } @else {
+      <p class="muted">{{ 'bk.fullHint' | t }}</p>
+      <pre class="snippet">sudo smartguard backup
 sudo smartguard restore /root/smartguard-backup-….tar.gz</pre>
+    }
   </section>
   `,
 })
 export class BackupComponent {
   private readonly api = inject(Api);
-  private readonly ui = inject(Ui);
+  readonly ui = inject(Ui);
   readonly i18n = inject(I18n);
   readonly busy = signal(false);
   readonly loaded = signal<SavedState | null>(null);

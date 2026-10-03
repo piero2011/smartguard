@@ -57,6 +57,8 @@ export class Ui {
   readonly site = signal(this.route.site);
   /** Sitios que ofrece el selector: los protegidos según Nginx más los que tienen datos */
   readonly siteOptions = signal<string[]>([]);
+  /** Cómo está desplegado SmartGuard (lo dice el servidor): en Docker no existen los comandos del servidor */
+  readonly deployment = signal<'docker' | 'system'>('system');
   /** Ventana de tiempo del Resumen, en minutos */
   readonly overviewMinutes = signal(this.route.range);
   /** Tema del panel: el del sistema por defecto; si se fija uno, se recuerda en este navegador */

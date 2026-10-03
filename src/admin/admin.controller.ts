@@ -17,6 +17,7 @@ import { BlocklistService } from '../blocklist/blocklist.service';
 import { IpInfoService } from '../ipinfo/ipinfo.service';
 import { ApiError } from '../common/api-error';
 import { SystemInfoService } from './system-info.service';
+import { detectDeployment } from '../common/deployment';
 import { NginxSitesService } from './nginx-sites.service';
 import { parseRuleDef } from '../config/config.service';
 import { compileSafeRegex } from '../rules/regex-safety';
@@ -553,7 +554,8 @@ export class AdminController {
 
   @Get('mode')
   getMode(): unknown {
-    return { audit: this.mode.audit, mode: this.mode.audit ? 'AUDIT' : 'ENFORCE' };
+    // deployment: el panel adapta lo que ofrece según sea una instalación en el sistema o en Docker
+    return { audit: this.mode.audit, mode: this.mode.audit ? 'AUDIT' : 'ENFORCE', deployment: detectDeployment() };
   }
 
   @Post('mode')

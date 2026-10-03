@@ -156,6 +156,12 @@ What the installer does:
 | `--upgrade-node` | Allows upgrading an older system Node to version 22 |
 | `--enable-nftables` | Also enables firewall blocking for direct connections |
 | `--skip-realip` | Does not enable Cloudflare's real IP (if you already configure it yourself) |
+| `--force` | Installs on the system even though a Docker deployment of SmartGuard was detected |
+
+The installer first checks whether SmartGuard is already on the server. If it finds the Docker
+stack it stops (two copies would compete for port 3100 and for Nginx); if it finds a system install
+it suggests `smartguard update` and asks before reinstalling. The dashboard shows which kind of
+install it is running on and only offers the commands that exist there.
 
 The installer **does not modify any vhost**: until step 4.3, SmartGuard sees no traffic.
 

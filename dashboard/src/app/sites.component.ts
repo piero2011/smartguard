@@ -51,7 +51,9 @@ const SNIPPET = `server {
       </table></div>
       <sg-pager [page]="page()" [total]="filtered().length" (go)="wanted.set($event)" />
       <div class="status">
-        @if (picked().size === 0) {
+        @if (ui.deployment() === 'docker') {
+          <p class="muted">{{ 'st.dockerHint' | t }}</p>
+        } @else if (picked().size === 0) {
           <p class="muted">{{ 'st.pickHint' | t }}</p>
         } @else {
           <p>{{ 'st.cmdProtect' | t: { count: picked().size } }}</p>
@@ -65,6 +67,7 @@ const SNIPPET = `server {
     } @else { <p class="muted">{{ 'common.loading' | t }}</p> }
   </section>
 
+  @if (ui.deployment() !== 'docker') {
   <section class="card">
     <h2>{{ 'st.addTitle' | t }}</h2>
     <p class="muted sub">{{ 'st.addManual' | t }}</p>
@@ -78,11 +81,12 @@ const SNIPPET = `server {
     <p class="msg warn">{{ 'st.addWarn' | t }}</p>
     <p class="muted">{{ 'st.addApps' | t }}</p>
   </section>
+  }
   `,
 })
 export class SitesComponent {
   private readonly api = inject(Api);
-  private readonly ui = inject(Ui);
+  readonly ui = inject(Ui);
   private readonly i18n = inject(I18n);
   readonly data = signal<NginxSites | null>(null);
   readonly snippet = SNIPPET;

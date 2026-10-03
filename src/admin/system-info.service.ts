@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import { ConfigService } from '../config/config.service';
 import { ReputationService } from '../reputation/reputation.service';
+import { detectDeployment } from '../common/deployment';
 
 export interface DiskEntry {
   id: string;
@@ -101,6 +102,7 @@ export class SystemInfoService {
     const mem = process.memoryUsage();
     return {
       version: pkg.version ?? '',
+      deployment: detectDeployment(),
       commit,
       node: process.version,
       uptimeSec: Math.round(process.uptime()),

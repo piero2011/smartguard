@@ -156,6 +156,12 @@ Opciones de `install.sh`:
 | `--upgrade-node` | Autoriza subir a la versión 22 un Node del sistema más antiguo |
 | `--enable-nftables` | Activa además el bloqueo en firewall para conexiones directas |
 | `--skip-realip` | No activa la IP real de Cloudflare (si ya la configuras tú) |
+| `--force` | Instala en el sistema aunque se haya detectado un SmartGuard desplegado con Docker |
+
+El instalador comprueba primero si SmartGuard ya está en el servidor. Si encuentra la pila de Docker
+se detiene (dos copias competirían por el puerto 3100 y por Nginx); si encuentra una instalación en el
+sistema propone `smartguard update` y pregunta antes de reinstalar. El panel indica sobre qué tipo de
+instalación corre y solo ofrece los comandos que existen en ella.
 
 El instalador **no modifica ningún vhost**: hasta el paso 4.3, SmartGuard no ve tráfico.
 

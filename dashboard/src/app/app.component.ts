@@ -132,6 +132,7 @@ export class AppComponent implements OnInit, OnDestroy {
     try {
       const m = await this.api.mode();
       this.mode.set(m.audit ? 'AUDIT' : 'ENFORCE');
+      this.ui.deployment.set(m.deployment === 'docker' ? 'docker' : 'system');
       this.connected.set(true);
       this.authError.set('');
       // sitios protegidos, para el selector de sitio (si no se pueden leer, se usan los que tengan datos)

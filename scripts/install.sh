@@ -3,7 +3,10 @@
 # SmartGuard — instalador seguro para Debian 13 (punto 85)
 # =============================================================================
 # Uso:  sudo ./scripts/install.sh [--dry-run] [--yes] [--enable-nftables] [--skip-realip]
-#                                [--no-deps] [--upgrade-node]
+#                                [--no-deps] [--upgrade-node] [--force]
+#
+# Antes de nada detecta si SmartGuard ya está en este servidor: en Docker (se detiene; --force para
+# instalar igualmente en el sistema) o instalado en el sistema (propone actualizar en su lugar).
 #
 # Qué hace (y qué NO hace):
 #   ✔ Instala lo que falte del sistema (apt): curl, tar, openssl, git, redis-tools, Node 22
@@ -34,6 +37,7 @@ SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 ENABLE_NFT=false
 SKIP_REALIP=false
+FORCE=false
 NO_DEPS=false
 UPGRADE_NODE=false
 for a in "$@"; do
@@ -43,6 +47,7 @@ for a in "$@"; do
     --enable-nftables) ENABLE_NFT=true ;;
     --skip-realip) SKIP_REALIP=true ;;
     --no-deps) NO_DEPS=true ;;
+    --force) FORCE=true ;;
     --upgrade-node) UPGRADE_NODE=true ;;
     -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
     *) die "Opción desconocida: $a" ;;
@@ -51,6 +56,29 @@ done
 
 require_root
 trap 'warn "La instalación se interrumpió en la línea $LINENO. Backup: ${BACKUP_PATH:-no creado}"' ERR
+
+# -----------------------------------------------------------------------------
+# 0a. ¿SmartGuard ya está en este servidor? (Docker o sistema)
+# -----------------------------------------------------------------------------
+# Contenedores de la pila de Compose (smartguard-smartguard-1, smartguard-nginx-1) o con las
+# imágenes smartguard / smartguard-nginx, estén arrancados o parados.
+docker_install() {
+  command -v docker >/dev/null 2>&1 || return 1
+  docker ps -a --format '{{.Names}} {{.Image}}' 2>/dev/null | grep -Ei '(^|[ /_-])smartguard([ :_-]|$)' || return 1
+}
+
+if found=$(docker_install); then
+  warn "SmartGuard ya está desplegado con Docker en este servidor:"
+  sed 's/^/    /' <<<"$found" >&2
+  if [ "$FORCE" != true ]; then
+    die "No se instala también en el sistema: dos SmartGuard competirían por el puerto 3100 y por Nginx. Para actualizar el de Docker: git pull && docker compose up -d --build. Para instalar igualmente en el sistema, retira antes la pila (docker compose down) o repite con --force."
+  fi
+  warn "--force: se continúa con la instalación en el sistema."
+fi
+if [ -f "$SG_OPT/package.json" ]; then
+  log "SmartGuard ya está instalado en el sistema ($SG_OPT). Para actualizarlo se usa: sudo smartguard update"
+  confirm "¿Reinstalar encima de todas formas?" || die "Cancelado. No se ha cambiado nada."
+fi
 
 # -----------------------------------------------------------------------------
 # 0. Dependencias del sistema: lo que falte se instala (Debian/Ubuntu con apt)

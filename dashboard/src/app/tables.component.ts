@@ -197,7 +197,7 @@ export function formatBytes(n: number | null | undefined): string {
   <p class="muted sub">{{ 'sys.hint' | t }}</p>
   @if (info(); as s) {
     <div class="cards">
-      <div class="stat"><span>{{ 'sys.version' | t }}</span><b>{{ s.version }}</b><span>{{ s.commit ? s.commit.slice(0, 7) : '' }} · Node {{ s.node }}</span></div>
+      <div class="stat"><span>{{ 'sys.version' | t }}</span><b>{{ s.version }}</b><span>{{ ('sys.deploy.' + (s.deployment ?? 'system')) | t }} · {{ s.commit ? s.commit.slice(0, 7) + ' · ' : '' }}Node {{ s.node }}</span></div>
       <div class="stat"><span>{{ 'sys.memory' | t }}</span><b>{{ bytes(s.memory.rss) }}</b><span>{{ 'sys.memoryHint' | t }}</span></div>
       <div class="stat"><span>{{ 'sys.disk' | t }}</span><b>{{ bytes(s.diskTotal) }}</b><span>{{ 'sys.diskHint' | t }}</span></div>
       <div class="stat"><span>{{ 'sys.redis' | t }}</span><b>{{ bytes(s.redis?.eventsBytes) }}</b>

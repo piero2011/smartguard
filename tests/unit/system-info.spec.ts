@@ -2,7 +2,17 @@ import { promises as fs } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { SystemInfoService } from '../../src/admin/system-info.service';
+import { detectDeployment } from '../../src/common/deployment';
 import { MemoryReputationStore } from '../../src/reputation/memory.store';
+
+describe('Tipo de despliegue', () => {
+  it('la variable manda; sin ella decide /.dockerenv', () => {
+    expect(detectDeployment({ SMARTGUARD_DEPLOYMENT: 'docker' }, () => false)).toBe('docker');
+    expect(detectDeployment({ SMARTGUARD_DEPLOYMENT: 'system' }, () => true)).toBe('system');
+    expect(detectDeployment({}, (p) => p === '/.dockerenv')).toBe('docker');
+    expect(detectDeployment({}, () => false)).toBe('system');
+  });
+});
 
 describe('Recursos que ocupa SmartGuard', () => {
   const store = new MemoryReputationStore();
@@ -23,6 +33,7 @@ describe('Recursos que ocupa SmartGuard', () => {
   it('informa de versión, memoria, disco por carpeta y almacén', async () => {
     const info = (await svc.info()) as { version: string; memory: { rss: number }; disk: { id: string; bytes: number | null }[]; diskTotal: number; redis: { events: number; eventsMax: number } };
     expect(info.version).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(['docker', 'system']).toContain((info as unknown as { deployment: string }).deployment);
     expect(info.memory.rss).toBeGreaterThan(0);
     expect(info.disk.map((d) => d.id)).toEqual(['app', 'prev', 'src', 'config', 'nginx', 'data', 'logs', 'backups']);
     expect(info.disk.find((d) => d.id === 'config')!.bytes).toBeNull();
