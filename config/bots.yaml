@@ -15,7 +15,8 @@ verified:
     name: Google (Googlebot, Inspection Tool, AdsBot, GoogleOther, Structured Data, Mediapartners, Storebot)
     ua: 'googlebot|google-inspectiontool|googleother|adsbot-google|mediapartners-google|google-structured-data|storebot-google|google-extended|apis-google|feedfetcher-google|google-read-aloud|google-site-verification'
     verify: fcrdns
-    domains: [googlebot.com, google.com, googleusercontent.com]
+    # googleusercontent.com NO: es también el PTR de las VMs de Google Cloud de cualquier cliente.
+    domains: [googlebot.com, google.com]
 
   - id: bing
     name: Bingbot / BingPreview / AdIdxBot
