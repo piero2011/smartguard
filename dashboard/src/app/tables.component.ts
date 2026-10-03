@@ -4,6 +4,7 @@ import { I18n, TPipe } from './i18n';
 import { EventFilter, Ui } from './ui';
 import { IpComponent } from './ipinfo';
 import { BlockButtonsComponent } from './block.component';
+import { PAGE_SIZE, PagerComponent, pageCount, pageOf } from './pager.component';
 
 /** Resumen: tarjetas + top rutas / IPs / reglas */
 @Component({
@@ -109,12 +110,12 @@ export class OverviewComponent {
 /** IPs bloqueadas (reales y, opcionalmente, simuladas en AUDIT) */
 @Component({
   selector: 'sg-bans',
-  imports: [TPipe, IpComponent],
+  imports: [TPipe, IpComponent, PagerComponent],
   template: `
   <section class="card">
     <div class="row between">
-      <h2>{{ 'bl.title' | t }} ({{ items().length }})</h2>
-      <label class="check"><input type="checkbox" [checked]="showAudit()" (change)="showAudit.set($any($event.target).checked); load()">
+      <h2>{{ 'bl.title' | t }} ({{ total() }})</h2>
+      <label class="check"><input type="checkbox" [checked]="showAudit()" (change)="showAudit.set($any($event.target).checked); go(1)">
         {{ 'bl.showAudit' | t }}</label>
     </div>
     <div class="scroll"><table>
@@ -134,6 +135,7 @@ export class OverviewComponent {
         </tr>
       } @empty { <tr><td colspan="10" class="muted">{{ 'common.none' | t }}</td></tr> }
     </table></div>
+    <sg-pager [page]="page()" [total]="total()" (go)="go($event)" />
   </section>
   `,
 })
@@ -144,22 +146,42 @@ export class BansComponent {
   readonly items = signal<BanRecord[]>([]);
   readonly showAudit = this.ui.showAuditBans;
   readonly permanent = isPermanent;
+  readonly page = signal(1);
+  readonly total = signal(0);
 
   constructor() {
     effect(() => {
       this.ui.changed();
-      void this.load();
+      // load() lee la página actual: sin untracked, cambiar de página lo relanzaría dos veces
+      untracked(() => void this.load());
     });
   }
 
+  /** Pide al servidor solo la página visible. Con AUDIT marcado, los simulados van a continuación de los reales. */
   async load(): Promise<void> {
     try {
-      const real = await this.api.bans(false);
-      const audit = this.showAudit() ? (await this.api.bans(true)).items : [];
-      this.items.set([...real.items, ...audit]);
+      const offset = (this.page() - 1) * PAGE_SIZE;
+      const real = await this.api.bans(false, offset, PAGE_SIZE);
+      let items = real.items;
+      let total = real.total;
+      if (this.showAudit()) {
+        const missing = PAGE_SIZE - items.length;
+        const audit = await this.api.bans(true, Math.max(0, offset - real.total), Math.max(1, missing));
+        total += audit.total;
+        items = [...items, ...audit.items.slice(0, missing)];
+      }
+      this.total.set(total);
+      // tras desbloquear, la página en la que se estaba puede haber dejado de existir
+      if (this.page() > pageCount(total)) return this.go(pageCount(total));
+      this.items.set(items);
     } catch (e) {
       this.ui.notify('error', () => this.api.describe(e as ApiErr));
     }
+  }
+
+  go(page: number): void {
+    this.page.set(page);
+    void this.load();
   }
 
   async unblock(b: BanRecord): Promise<void> {
@@ -194,14 +216,14 @@ interface AllowRow {
 /** Lista blanca: .env (solo lectura) + dinámica (se puede quitar) */
 @Component({
   selector: 'sg-allowlist',
-  imports: [TPipe],
+  imports: [TPipe, PagerComponent],
   template: `
   <section class="card">
     <h2>{{ 'al.title' | t }} ({{ rows().length }})</h2>
     <div class="scroll"><table>
       <tr><th>{{ 'al.value' | t }}</th><th>{{ 'al.list' | t }}</th><th>{{ 'al.target' | t }}</th><th>{{ 'al.origin' | t }}</th>
         <th>{{ 'al.resolved' | t }}</th><th></th></tr>
-      @for (r of rows(); track r.list + r.target + r.value) {
+      @for (r of shown(); track r.list + r.target + r.value) {
         <tr>
           <td><code>{{ r.value }}</code></td><td>{{ ('list.' + r.list) | t }}</td><td>{{ ('al.target.' + r.target) | t }}</td>
           <td>{{ r.origin }}</td><td class="muted">{{ r.resolved }}</td>
@@ -210,6 +232,7 @@ interface AllowRow {
         </tr>
       } @empty { <tr><td colspan="6" class="muted">{{ 'common.none' | t }}</td></tr> }
     </table></div>
+    <sg-pager [page]="page()" [total]="rows().length" (go)="wanted.set($event)" />
   </section>
   `,
 })
@@ -218,6 +241,9 @@ export class AllowlistComponent {
   private readonly ui = inject(Ui);
   private readonly i18n = inject(I18n);
   readonly data = signal<AllowList | null>(null);
+  readonly wanted = signal(1);
+  readonly page = computed(() => Math.min(this.wanted(), pageCount(this.rows().length)));
+  readonly shown = computed(() => pageOf(this.rows(), this.page()));
 
   constructor() {
     effect(() => {
@@ -226,7 +252,8 @@ export class AllowlistComponent {
     });
   }
 
-  rows(): AllowRow[] {
+  readonly rows = computed<AllowRow[]>(() => {
+    this.i18n.lang();
     const a = this.data();
     if (!a) return [];
     const out: AllowRow[] = [];
@@ -254,7 +281,7 @@ export class AllowlistComponent {
       });
     }
     return out;
-  }
+  });
 
   async load(): Promise<void> {
     try {
@@ -279,7 +306,7 @@ export class AllowlistComponent {
 /** Redes completas (ASN) bloqueadas: lista y baja. Se bloquean desde una fila de Eventos o del Resumen. */
 @Component({
   selector: 'sg-blocked-networks',
-  imports: [TPipe],
+  imports: [TPipe, PagerComponent],
   template: `
   <section class="card">
     <h2>{{ 'net.title' | t }} ({{ items().length }})</h2>
@@ -287,12 +314,13 @@ export class AllowlistComponent {
     <div class="scroll"><table>
       <tr><th>{{ 'net.org' | t }}</th><th>ASN</th><th>{{ 'ev.country' | t }}</th><th class="num">{{ 'net.ranges' | t }}</th>
         <th>{{ 'bl.created' | t }}</th><th>{{ 'net.updated' | t }}</th><th></th></tr>
-      @for (n of items(); track n.asn) {
+      @for (n of shown(); track n.asn) {
         <tr><td>{{ n.org }}</td><td><code>AS{{ n.asn }}</code></td><td>{{ n.country }}</td><td class="num">{{ n.prefixCount }}</td>
           <td>{{ i18n.date(n.createdAt) }}</td><td>{{ i18n.date(n.fetchedAt) }}</td>
           <td class="actions"><button class="small primary" (click)="remove(n)">{{ 'common.unblock' | t }}</button></td></tr>
       } @empty { <tr><td colspan="7" class="muted">{{ 'common.none' | t }}</td></tr> }
     </table></div>
+    <sg-pager [page]="page()" [total]="items().length" (go)="wanted.set($event)" />
   </section>
   `,
 })
@@ -301,6 +329,9 @@ export class BlockedNetworksComponent {
   private readonly ui = inject(Ui);
   readonly i18n = inject(I18n);
   readonly items = signal<BlockedNetwork[]>([]);
+  readonly wanted = signal(1);
+  readonly page = computed(() => Math.min(this.wanted(), pageCount(this.items().length)));
+  readonly shown = computed(() => pageOf(this.items(), this.page()));
 
   constructor() {
     effect(() => {
@@ -332,7 +363,7 @@ export class BlockedNetworksComponent {
 /** Bots bloqueados por nombre (texto del User-Agent): lista, alta y baja */
 @Component({
   selector: 'sg-blocked-bots',
-  imports: [TPipe],
+  imports: [TPipe, PagerComponent],
   template: `
   <section class="card">
     <h2>{{ 'bb.title' | t }} ({{ items().length }})</h2>
@@ -344,11 +375,12 @@ export class BlockedNetworksComponent {
     </div>
     <div class="scroll"><table>
       <tr><th>{{ 'bb.pattern' | t }}</th><th>{{ 'bb.note' | t }}</th><th>{{ 'bl.created' | t }}</th><th></th></tr>
-      @for (b of items(); track b.pattern) {
+      @for (b of shown(); track b.pattern) {
         <tr><td><code>{{ b.pattern }}</code></td><td>{{ b.note }}</td><td>{{ i18n.date(b.createdAt) }}</td>
           <td class="actions"><button class="small primary" (click)="remove(b.pattern)">{{ 'common.unblock' | t }}</button></td></tr>
       } @empty { <tr><td colspan="4" class="muted">{{ 'common.none' | t }}</td></tr> }
     </table></div>
+    <sg-pager [page]="page()" [total]="items().length" (go)="wanted.set($event)" />
   </section>
   `,
 })
@@ -358,6 +390,9 @@ export class BlockedBotsComponent {
   readonly i18n = inject(I18n);
   readonly items = signal<BlockedBot[]>([]);
   readonly input = signal('');
+  readonly wanted = signal(1);
+  readonly page = computed(() => Math.min(this.wanted(), pageCount(this.items().length)));
+  readonly shown = computed(() => pageOf(this.items(), this.page()));
 
   constructor() {
     effect(() => {
@@ -400,7 +435,7 @@ export class BlockedBotsComponent {
 }
 
 /** Eventos por página y máximo de peticiones encadenadas para llenar una (cada una revisa un tramo acotado). */
-const EVENTS_PAGE_SIZE = 50;
+const EVENTS_PAGE_SIZE = PAGE_SIZE;
 const EVENTS_MAX_ROUNDS = 8;
 
 /** Eventos de seguridad: una página cada vez; filtros, búsqueda y fechas los resuelve el servidor. */

@@ -235,8 +235,8 @@ export class Api {
   setMode(audit: boolean): Promise<{ audit: boolean; mode: string }> {
     return this.req('POST', '/admin/mode', { audit });
   }
-  bans(audit: boolean): Promise<{ total: number; items: BanRecord[] }> {
-    return this.req('GET', `/admin/bans?audit=${audit}&limit=500`);
+  bans(audit: boolean, offset = 0, limit = 500): Promise<{ total: number; items: BanRecord[] }> {
+    return this.req('GET', `/admin/bans?audit=${audit}&offset=${offset}&limit=${limit}`);
   }
   events(limit = 100): Promise<SecurityEvent[]> {
     return this.req('GET', `/admin/events?limit=${limit}`);
