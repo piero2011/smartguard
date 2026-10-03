@@ -16,6 +16,7 @@ import { AllowBody, BanBody, BotBody, BotQuery, EventsPageQuery, EventsQuery, Ip
 import { BlocklistService } from '../blocklist/blocklist.service';
 import { IpInfoService } from '../ipinfo/ipinfo.service';
 import { ApiError } from '../common/api-error';
+import { SystemInfoService } from './system-info.service';
 import { logger } from '../common/logger';
 
 /**
@@ -35,6 +36,7 @@ export class AdminController {
     private readonly cfRanges: CloudflareRangesService,
     private readonly blocklist: BlocklistService,
     private readonly ipinfo: IpInfoService,
+    private readonly system: SystemInfoService,
   ) {}
 
   private key(ip: ParsedIp): string {
@@ -327,6 +329,12 @@ export class AdminController {
     const filtered = q.from !== undefined || q.to !== undefined || q.ip !== undefined;
     const query = { from: q.from === undefined ? undefined : Number(q.from), to: q.to === undefined ? undefined : Number(q.to), ip: q.ip };
     return this.reputation.call((s) => s.listEvents(q.limit ?? 100, filtered ? query : undefined));
+  }
+
+  /** Versión instalada y lo que ocupa SmartGuard: disco por carpeta, memoria del proceso y Redis. */
+  @Get('system')
+  async systemInfo(): Promise<unknown> {
+    return this.system.info();
   }
 
   @Get('events/page')

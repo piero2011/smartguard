@@ -8,6 +8,7 @@ import {
   BlockedNetwork,
   EventPage,
   EventQuery,
+  StorageInfo,
   IpState,
   ReputationStore,
   ScoringParams,
@@ -367,6 +368,20 @@ export class RedisReputationStore implements ReputationStore {
       }
       return { id, event };
     });
+  }
+
+  async storageInfo(): Promise<StorageInfo> {
+    const key = this.k('events');
+    const [events, bytes, info] = await this.redis.run((c) =>
+      Promise.all([
+        c.xlen(key),
+        // MEMORY USAGE muestrea el stream (SAMPLES 5 por defecto): coste constante
+        c.call('MEMORY', 'USAGE', key).catch(() => null),
+        c.info('memory').catch(() => ''),
+      ]),
+    );
+    const used = /^used_memory:(\d+)/m.exec(String(info));
+    return { events: Number(events), eventsBytes: bytes === null ? null : Number(bytes), redisUsedBytes: used ? Number(used[1]) : null };
   }
 
   async flushStats(minute: number, fields: Record<string, number>, ips: string[], top: TopIncrements): Promise<void> {

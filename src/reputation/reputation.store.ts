@@ -131,6 +131,16 @@ export interface EventPage {
   next: string | null;
 }
 
+/** Lo que SmartGuard ocupa en el almacén (para el panel). null = dato no disponible. */
+export interface StorageInfo {
+  /** eventos guardados en el historial */
+  events: number;
+  /** memoria del historial de eventos, lo más pesado de SmartGuard en Redis */
+  eventsBytes: number | null;
+  /** memoria total del servidor Redis (compartido con otros usos, p. ej. la caché de WordPress) */
+  redisUsedBytes: number | null;
+}
+
 export interface StatsBucket {
   minute: number;
   fields: Record<string, number>;
@@ -182,6 +192,8 @@ export interface ReputationStore {
    * llamada: puede devolver menos de `limit` con `next` no nulo (quedan eventos por revisar).
    */
   pageEvents(limit: number, query: EventQuery, cursor?: string): Promise<EventPage>;
+
+  storageInfo(): Promise<StorageInfo>;
 
   flushStats(minute: number, fields: Record<string, number>, ips: string[], top: TopIncrements): Promise<void>;
   readStats(minutes: number[]): Promise<StatsBucket[]>;

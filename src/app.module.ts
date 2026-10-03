@@ -20,6 +20,7 @@ import { LogAnalyzerService } from './logs/log-analyzer.service';
 import { DecisionController } from './nginx/decision.controller';
 import { HealthController } from './health/health.controller';
 import { AdminController } from './admin/admin.controller';
+import { SystemInfoService } from './admin/system-info.service';
 import { DashboardController } from './dashboard/dashboard.controller';
 import { AdminAuthGuard, LocalOnlyGuard } from './common/security';
 
@@ -67,6 +68,7 @@ export class AppModule {
         BanService,
         BlocklistService,
         IpInfoService,
+        SystemInfoService,
         ScoringService,
         LogAnalyzerService,
         LocalOnlyGuard,

@@ -7,6 +7,7 @@ import {
   BlockedNetwork,
   EventPage,
   EventQuery,
+  StorageInfo,
   IpState,
   ReputationStore,
   ScoringParams,
@@ -287,6 +288,9 @@ export class MemoryReputationStore implements ReputationStore {
       if (items.length >= limit) return { items, next: i + 1 < this.events.length ? `${i}-0` : null };
     }
     return { items, next: null };
+  }
+  async storageInfo(): Promise<StorageInfo> {
+    return { events: this.events.length, eventsBytes: null, redisUsedBytes: null };
   }
   async flushStats(minute: number, fields: Record<string, number>, _ips: string[], top: TopIncrements): Promise<void> {
     const cur = this.stats.get(String(minute)) ?? {};

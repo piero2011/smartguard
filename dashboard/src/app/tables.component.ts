@@ -1,5 +1,5 @@
-import { Component, OnDestroy, computed, effect, inject, signal, untracked } from '@angular/core';
-import { AllowList, Api, ApiErr, BanRecord, BlockedBot, BlockedNetwork, SecurityEvent, Stats, isPermanent } from './api.service';
+import { Component, OnDestroy, computed, effect, forwardRef, inject, signal, untracked } from '@angular/core';
+import { AllowList, Api, ApiErr, BanRecord, BlockedBot, BlockedNetwork, SecurityEvent, Stats, SystemInfo, isPermanent } from './api.service';
 import { I18n, TPipe } from './i18n';
 import { EventFilter, Ui } from './ui';
 import { IpComponent } from './ipinfo';
@@ -13,7 +13,7 @@ const RANGES = [60, 360, 1440] as const;
 /** Resumen: gráfico de peticiones en el tiempo, contadores y los "top" con barras. */
 @Component({
   selector: 'sg-overview',
-  imports: [TPipe, IpComponent, BlockButtonsComponent, ChartComponent],
+  imports: [TPipe, IpComponent, BlockButtonsComponent, ChartComponent, forwardRef(() => ResourcesComponent)],
   template: `
   <div class="row toolbar">
     <div class="seg" role="group" [attr.aria-label]="'ov.range' | t">
@@ -69,6 +69,7 @@ const RANGES = [60, 360, 1440] as const;
       </section>
     </div>
     </div>
+    <sg-resources />
   } @else { <p class="muted">{{ 'common.loading' | t }}</p> }
   `,
 })
@@ -170,6 +171,58 @@ export class OverviewComponent {
     } catch (e) {
       this.ui.notify('error', () => this.api.describe(e as ApiErr));
     }
+  }
+}
+
+/** Bytes en unidades legibles (KB / MB / GB). */
+export function formatBytes(n: number | null | undefined): string {
+  if (n === null || n === undefined) return '—';
+  if (n < 1024 * 1024) return `${Math.max(1, Math.round(n / 1024))} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(n < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+/** Recursos que usa SmartGuard en el servidor: versión, memoria, disco por carpeta y Redis. */
+@Component({
+  selector: 'sg-resources',
+  imports: [TPipe],
+  template: `
+  <h2 class="section">{{ 'sys.title' | t }}</h2>
+  <p class="muted sub">{{ 'sys.hint' | t }}</p>
+  @if (info(); as s) {
+    <div class="cards">
+      <div class="stat"><span>{{ 'sys.version' | t }}</span><b>{{ s.version }}</b><span>{{ s.commit ? s.commit.slice(0, 7) : '' }} · Node {{ s.node }}</span></div>
+      <div class="stat"><span>{{ 'sys.memory' | t }}</span><b>{{ bytes(s.memory.rss) }}</b><span>{{ 'sys.memoryHint' | t }}</span></div>
+      <div class="stat"><span>{{ 'sys.disk' | t }}</span><b>{{ bytes(s.diskTotal) }}</b><span>{{ 'sys.diskHint' | t }}</span></div>
+      <div class="stat"><span>{{ 'sys.redis' | t }}</span><b>{{ bytes(s.redis?.eventsBytes) }}</b>
+        <span>{{ 'sys.redisHint' | t: { events: s.redis?.events ?? 0, max: s.redis?.eventsMax ?? 0 } }}</span></div>
+      <div class="stat"><span>{{ 'sys.redisTotal' | t }}</span><b>{{ bytes(s.redis?.redisUsedBytes) }}</b><span>{{ 'sys.redisTotalHint' | t }}</span></div>
+    </div>
+    <section class="card"><h3>{{ 'sys.diskDetail' | t }}</h3>
+      @for (d of s.disk; track d.id) {
+        <div class="bar-row">
+          <div class="bar-label">{{ ('sys.dir.' + d.id) | t }} <code class="muted">{{ d.path }}</code></div>
+          <div class="bar" [title]="bytes(d.bytes)"><span [style.width.%]="pct(d.bytes, s)"></span></div>
+          <b class="bar-value">{{ d.bytes === null ? ('sys.unreadable' | t) : bytes(d.bytes) }}</b>
+        </div>
+      }
+    </section>
+  }
+  `,
+})
+export class ResourcesComponent {
+  private readonly api = inject(Api);
+  readonly info = signal<SystemInfo | null>(null);
+  readonly bytes = formatBytes;
+
+  constructor() {
+    // se pide una vez al abrir el Resumen: no cambia de un refresco a otro
+    void this.api.system().then((s) => this.info.set(s)).catch(() => undefined);
+  }
+
+  pct(bytes: number | null, s: SystemInfo): number {
+    const max = Math.max(1, ...s.disk.map((d) => d.bytes ?? 0));
+    return bytes ? Math.max(1, (bytes / max) * 100) : 0;
   }
 }
 

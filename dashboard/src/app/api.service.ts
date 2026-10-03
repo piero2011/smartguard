@@ -85,6 +85,19 @@ export interface Stats {
   degraded: boolean;
 }
 
+/** Versión instalada y lo que ocupa SmartGuard en el servidor */
+export interface SystemInfo {
+  version: string;
+  commit: string;
+  node: string;
+  uptimeSec: number;
+  memory: { rss: number; heapUsed: number };
+  disk: { id: string; path: string; bytes: number | null }[];
+  diskTotal: number;
+  diskScannedAt: number;
+  redis: { events: number; eventsMax: number; eventsBytes: number | null; redisUsedBytes: number | null; degraded: boolean } | null;
+}
+
 export interface SecurityEvent {
   timestamp: number;
   ip: string;
@@ -241,6 +254,9 @@ export class Api {
   }
   bans(audit: boolean, offset = 0, limit = 500): Promise<{ total: number; items: BanRecord[] }> {
     return this.req('GET', `/admin/bans?audit=${audit}&offset=${offset}&limit=${limit}`);
+  }
+  system(): Promise<SystemInfo> {
+    return this.req('GET', '/admin/system');
   }
   events(limit = 100): Promise<SecurityEvent[]> {
     return this.req('GET', `/admin/events?limit=${limit}`);
