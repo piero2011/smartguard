@@ -69,16 +69,24 @@ describe('Búsqueda de eventos por fechas e IP', () => {
   it('Redis: pagina el stream por cursor, con y sin filtros, y respeta el rango de fechas', async () => {
     // Stream simulado: XREVRANGE con los mismos límites inclusivos que Redis ("ms" = ms-0 al inicio, ms-máx al final).
     const rows: [string, string[]][] = [];
-    const bound = (v: string, seqDefault: bigint): [bigint, bigint] => {
+    const bound = (v: string, seqDefault: number): [number, number] => {
       const [ms, seq] = v.split('-');
-      return [BigInt(ms!), seq === undefined ? seqDefault : BigInt(seq)];
+      return [Number(ms), seq === undefined ? seqDefault : Number(seq)];
     };
-    const le = (a: [bigint, bigint], b: [bigint, bigint]) => a[0] < b[0] || (a[0] === b[0] && a[1] <= b[1]);
+    const le = (a: [number, number], b: [number, number]) => a[0] < b[0] || (a[0] === b[0] && a[1] <= b[1]);
     const client = {
-      xrevrange: async (_k: string, end: string, start: string, _c: string, count: number) =>
-        rows
-          .filter(([id]) => (end === '+' || le(bound(id, 0n), bound(end, 18446744073709551615n))) && (start === '-' || le(bound(start, 0n), bound(id, 0n))))
-          .slice(0, count),
+      xrevrange: async (_k: string, end: string, start: string, _c: string, count: number) => {
+        const hi = end === '+' ? null : bound(end, Infinity);
+        const lo = start === '-' ? null : bound(start, 0);
+        const out: [string, string[]][] = [];
+        for (const row of rows) {
+          const id = bound(row[0], 0);
+          if (hi && !le(id, hi)) continue;
+          if (lo && !le(lo, id)) break;
+          if (out.push(row) >= count) break;
+        }
+        return out;
+      },
     };
     const redis = { key: (s: string) => s, run: <T>(fn: (c: typeof client) => Promise<T>) => fn(client) };
     const store = new RedisReputationStore(redis as never);
