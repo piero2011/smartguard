@@ -1,0 +1,127 @@
+import { AllowType, BanRecord, BanScope, SecurityEvent } from '../common/types';
+
+export interface ScoringParams {
+  decayPerMinute: number;
+  burstWindowMs: number;
+  burstThreshold: number;
+  burstBonus: number;
+  reasonsMax: number;
+}
+
+export interface ApplyInput {
+  ipKey: string;
+  fpKey: string;
+  now: number;
+  ipDelta: number;
+  fpDelta: number;
+  strongDelta: number;
+  isHit: boolean;
+  /** "env-scan+25,git-scan+25" (vacío si no hay señales) */
+  reason: string;
+  ipTtlSec: number;
+  fpTtlSec: number;
+  country: string;
+  audit: boolean;
+}
+
+export interface ApplyResult {
+  ipBanTtlMs: number;
+  fpBanTtlMs: number;
+  ipScore: number;
+  strongScore: number;
+  fpScore: number;
+  burstBonus: number;
+  decay: number;
+  windowHits: number;
+}
+
+export interface IpState {
+  /** score almacenado SIN decay (ver updatedAt) */
+  score: number;
+  updatedAt?: number;
+  strong: number;
+  firstSeen?: number;
+  lastSeen?: number;
+  hits: number;
+  country?: string;
+  reasons: { at: number; reason: string }[];
+  recidivism: number;
+}
+
+export type AllowKind = 'cidr' | 'domain' | 'wildcard';
+/** client = quién hace la petición (IP/dominio del cliente) · host = sitio/subdominio destino exento */
+export type AllowTarget = 'client' | 'host';
+
+export interface AllowEntry {
+  /** IP/CIDR canónico, dominio exacto (app.ejemplo.com) o subdominios (*.ejemplo.com) */
+  value: string;
+  kind: AllowKind;
+  target: AllowTarget;
+  type: AllowType;
+  note: string;
+  createdAt: number;
+  expiresAt?: number;
+}
+
+export interface StatsBucket {
+  minute: number;
+  fields: Record<string, number>;
+}
+
+/**
+ * Almacén de reputación. Implementaciones: Redis (producción, compartido entre instancias)
+ * y memoria (tests + modo degradado cuando Redis está caído).
+ */
+export interface ReputationStore {
+  readonly kind: 'redis' | 'memory';
+  apply(input: ApplyInput, params: ScoringParams): Promise<ApplyResult>;
+  throttle(key: string, windowSec: number): Promise<number>;
+
+  setBan(record: BanRecord): Promise<void>;
+  getBan(scope: BanScope, key: string, audit: boolean): Promise<BanRecord | null>;
+  deleteBan(scope: BanScope, key: string): Promise<boolean>;
+  listBans(audit: boolean, offset: number, limit: number): Promise<BanRecord[]>;
+  countBans(audit: boolean): Promise<number>;
+  incrRecidivism(ipKey: string, ttlSec: number): Promise<number>;
+  getRecidivism(ipKey: string): Promise<number>;
+  getIpState(ipKey: string): Promise<IpState | null>;
+  /** Olvida la reputación de una IP (score, motivos, reincidencia) y de las huellas indicadas. */
+  resetIp(ipKey: string, fpKeys: string[]): Promise<void>;
+
+  getDns(ip: string): Promise<string | null>;
+  setDns(ip: string, value: string, ttlSec: number): Promise<void>;
+
+  getAuditOverride(): Promise<boolean | null>;
+  setAuditOverride(audit: boolean): Promise<void>;
+
+  listAllow(): Promise<AllowEntry[]>;
+  setAllow(entry: AllowEntry): Promise<void>;
+  deleteAllow(value: string): Promise<boolean>;
+
+  pushEvents(events: SecurityEvent[], maxLen: number): Promise<void>;
+  listEvents(limit: number): Promise<SecurityEvent[]>;
+
+  flushStats(minute: number, fields: Record<string, number>, ips: string[], top: TopIncrements): Promise<void>;
+  readStats(minutes: number[]): Promise<StatsBucket[]>;
+  readActiveIps(minutes: number[]): Promise<number>;
+  readTop(kind: 'paths' | 'ips' | 'rules', hours: number[], limit: number): Promise<{ member: string; score: number }[]>;
+
+  getCfRule(ipKey: string): Promise<{ ruleId: string; expiresAt: number } | null>;
+  setCfRule(ipKey: string, ruleId: string, expiresAt: number): Promise<void>;
+  deleteCfRule(ipKey: string): Promise<void>;
+  dueCfRules(now: number, limit: number): Promise<string[]>;
+  countCfRules(): Promise<number>;
+  /** dedup genérico: true si la clave no existía (SET NX EX) */
+  once(key: string, ttlSec: number): Promise<boolean>;
+}
+
+export interface TopIncrements {
+  hour: number;
+  paths: Map<string, number>;
+  ips: Map<string, number>;
+  rules: Map<string, number>;
+}
+
+export function banIndexMember(scope: BanScope, key: string): string {
+  return `${scope}|${key}`;
+}

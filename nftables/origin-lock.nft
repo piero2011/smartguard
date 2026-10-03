@@ -1,0 +1,15 @@
+#!/usr/sbin/nft -f
+# =============================================================================
+# Protección del origen (punto 43): HTTP/HTTPS SOLO desde Cloudflare + IPs de confianza.
+# NO se aplica automáticamente. Usar:  scripts/origin-lock.sh check | enable [--dry-run] | disable
+#
+# Llega aquí solo lo que NO es loopback, trusted_* ni cloudflare_* (return en la cadena input).
+# Requisitos antes de activar (origin-lock.sh check los comprueba):
+#   - TODOS los dominios servidos por este Nginx están proxyados (nube naranja) en Cloudflare.
+#   - Let's Encrypt HTTP-01 llega a través de Cloudflare (proxy) → sigue funcionando.
+#   - Ningún servicio externo (webhooks de pasarelas, APIs) llama DIRECTO a la IP del VPS.
+#   - Tu IP admin está en trusted_v4/v6 (ADMIN_ALLOWLIST) para acceso directo de emergencia.
+# =============================================================================
+flush chain inet smartguard origin_lock
+add rule inet smartguard origin_lock tcp dport { 80, 443 } counter drop
+add rule inet smartguard origin_lock udp dport 443 counter drop

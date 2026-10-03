@@ -1,0 +1,11 @@
+# /etc/systemd/system/smartguard-cf-ips.timer
+[Unit]
+Description=SmartGuard: actualización semanal de rangos Cloudflare
+
+[Timer]
+OnCalendar=weekly
+RandomizedDelaySec=6h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

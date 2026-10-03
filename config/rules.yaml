@@ -1,0 +1,494 @@
+# =============================================================================
+# SmartGuard — reglas globales
+# =============================================================================
+# Cada regla:
+#   id          identificador único (a-z0-9_.-)
+#   name        descripción legible
+#   enabled     true/false
+#   target      path (ruta decodificada/normalizada) | query (decodificada 1-2 veces) |
+#               uri (cruda, con query) | ua (User-Agent) | method
+#   pattern     regex (se valida anti-ReDoS al cargar: sin (a+)+, sin (a|b)+, sin backrefs)
+#   flags       "i" (por defecto) o "" (sensible a mayúsculas)
+#   methods     [GET, POST] … (vacío = todos)
+#   score       puntos
+#   severity    low | medium | high | critical
+#   confidence  low    → solo huella IP+UA (seguro para NAT)
+#               medium → IP + huella (puede limitar, NUNCA banear la IP sola)
+#               high   → IP + huella + evidencia fuerte (necesaria para banear la IP)
+#   category    NORMAL RATE_SPIKE SCANNER SENSITIVE_FILE WP_SCAN LOGIN_ABUSE XMLRPC_ABUSE
+#               SQLI XSS TRAVERSAL RCE WEBSHELL_SCAN BAD_BOT VERIFIED_BOT UNKNOWN
+#   action      score (suma) | block (además bloquea ESTA petición en ENFORCE) | allow (excepción)
+#   ttl         segundos mínimos que se conserva la reputación tras dispararse
+#   phase       decision (auth_request) | analyzer (log) | both
+#   status      [404] … solo analyzer: exige ese estado de respuesta
+#
+# Personalizaciones: NO edites este archivo en el servidor; crea /etc/smartguard/rules.d/*.yaml
+# (update.sh no los toca) o usa overrides por sitio en sites.yaml.
+# Recarga sin reiniciar:  smartguard rules reload
+# =============================================================================
+
+version: 1
+
+# Señales de comportamiento (analizador de logs). Valores iniciales, ajustables.
+behavior:
+  notFound:      { score: 1,  confidence: low }                                  # cada 404 dinámico
+  notFoundBurst: { score: 5,  confidence: medium, windowSec: 60,  threshold: 20 } # muchos 404 distintos
+  phpNotFound:   { score: 10, confidence: medium }                               # .php inexistente
+  pluginEnum:    { score: 20, confidence: high,   windowSec: 120, threshold: 10 } # 10 plugins/themes distintos 404
+  loginFailed:   { score: 10, confidence: low,    windowSec: 600, threshold: 8 }  # 8 logins fallidos (misma huella)
+  loginStuffing: { score: 20, confidence: high,   windowSec: 600, threshold: 30 } # 30 logins fallidos (misma IP)
+  rateLimited:   { score: 2,  confidence: low }                                  # 429 de limit_req
+  nginxDenied:   { score: 3,  confidence: medium }                               # 403/444 cortado por Nginx
+
+rules:
+  # ---------------------------------------------------------------------------
+  # Excepciones (allow): nunca puntúan
+  # ---------------------------------------------------------------------------
+  - id: allow-well-known
+    name: Rutas .well-known legítimas (ACME, security.txt, app links)
+    target: path
+    pattern: '^/\.well-known/(?:acme-challenge/|pki-validation/[\w.-]{1,80}\.txt$|security\.txt$|apple-app-site-association$|assetlinks\.json$|openid-configuration$|change-password$)'
+    score: 0
+    severity: low
+    category: NORMAL
+    action: allow
+
+  # ---------------------------------------------------------------------------
+  # Archivos sensibles
+  # ---------------------------------------------------------------------------
+  - id: env-scan
+    name: Intento de leer .env
+    target: path
+    pattern: '(?:^|/)\.env(?:\.[\w.-]{1,30})?$'
+    score: 25
+    severity: high
+    confidence: high
+    category: SENSITIVE_FILE
+    ttl: 86400
+
+  - id: git-scan
+    name: Repositorio de control de versiones (.git/.svn/.hg)
+    target: path
+    pattern: '(?:^|/)\.(?:git|svn|hg|bzr)(?:/|$)'
+    score: 25
+    severity: high
+    confidence: high
+    category: SENSITIVE_FILE
+    ttl: 86400
+
+  - id: dotfile-credentials
+    name: Credenciales en dotfiles (.aws, .ssh, .docker, .htpasswd…)
+    target: path
+    pattern: '(?:^|/)\.(?:aws|ssh|docker|kube|npmrc|pypirc|bash_history|zsh_history|htpasswd|DS_Store|vscode|idea|config)(?:/|$)'
+    score: 25
+    severity: high
+    confidence: high
+    category: SENSITIVE_FILE
+    ttl: 86400
+
+  - id: htaccess-probe
+    name: Lectura de .htaccess
+    target: path
+    pattern: '(?:^|/)\.htaccess$'
+    score: 10
+    severity: medium
+    confidence: medium
+    category: SENSITIVE_FILE
+
+  - id: wp-config-probe
+    name: Acceso directo a wp-config.php
+    target: path
+    pattern: '(?:^|/)wp-config\.php$'
+    score: 15
+    severity: high
+    confidence: high
+    category: SENSITIVE_FILE
+    ttl: 86400
+
+  - id: wp-config-backup
+    name: Copias de wp-config (.bak, .old, ~, .txt, .save…)
+    target: path
+    pattern: '(?:^|/)wp-config(?:-sample)?\.php.{1,20}$|(?:^|/)wp-config\.(?:bak|old|txt|save|orig|zip)$'
+    score: 25
+    severity: high
+    confidence: high
+    category: SENSITIVE_FILE
+    ttl: 86400
+
+  - id: db-dump-scan
+    name: Volcados de base de datos (.sql, .sqlite, .db)
+    target: path
+    pattern: '^(?!/(?:[\w-]+/)?wp-content/uploads/).*\.(?:sql|sqlite3?|db|mdb|dump)(?:\.(?:gz|zip|bz2|tar|7z))?$'
+    score: 20
+    severity: high
+    confidence: high
+    category: SENSITIVE_FILE
+    ttl: 86400
+
+  - id: backup-archive-root
+    name: Archivos de backup en la raíz (/backup.zip, /site.tar.gz…)
+    target: path
+    pattern: '^/(?:[\w-]+/)?(?![^/]{0,80}sitemap)[^/]{0,80}\.(?:bak|backup|old|orig|save|swp|swo|tar|tgz|tar\.gz|zip|rar|7z|gz|bz2)$'
+    score: 10
+    severity: medium
+    confidence: medium
+    category: SENSITIVE_FILE
+
+  - id: config-file-probe
+    name: Archivos de configuración fuera de WordPress (config.php, settings.yml…)
+    target: path
+    pattern: '^(?!/(?:[\w-]+/)?wp-(?:content|includes|admin)/).*/(?:config|configuration|settings|database|credentials|secrets?|parameters|local|app)\.(?:php|inc|ini|ya?ml|json|xml|conf|cfg|env|bak|old|txt|properties)$'
+    score: 15
+    severity: high
+    confidence: high
+    category: SENSITIVE_FILE
+    ttl: 86400
+
+  - id: log-file-probe
+    name: Lectura de logs (debug.log, error_log, wc-logs)
+    target: path
+    pattern: '(?:^|/)(?:debug\.log|error_log|error\.log|access\.log|php_errors?\.log)$|/wc-logs/'
+    score: 15
+    severity: high
+    confidence: high
+    category: SENSITIVE_FILE
+
+  - id: phpinfo-probe
+    name: phpinfo / test / info
+    target: path
+    pattern: '(?:^|/)(?:phpinfo|php_info|info|pi|i|test|tests|php|infos?|phptest|p)\.php$'
+    score: 15
+    severity: high
+    confidence: high
+    category: SCANNER
+
+  - id: dbadmin-probe
+    name: phpMyAdmin / Adminer / paneles de BD
+    target: path
+    pattern: '^/(?:[\w-]+/)?(?:adminer[\w.-]{0,20}\.php|phpmyadmin|pma|myadmin|mysqladmin|dbadmin|sqladmin|mysql|phpMyAdmin[\w.-]{0,10}|sql)(?:/|$)'
+    score: 15
+    severity: high
+    confidence: high
+    category: SCANNER
+
+  # ---------------------------------------------------------------------------
+  # Webshells y exploits genéricos
+  # ---------------------------------------------------------------------------
+  - id: webshell-scan
+    name: Nombres de webshell conocidos
+    target: path
+    pattern: '^(?!.*/wp-(?:admin|includes)/).*(?:^|/)(?:wso\d{0,3}|c99\w{0,6}|r57\w{0,6}|b374k\w{0,6}|alfa\w{0,12}|shell\d{0,3}|sh3ll|webshell|wp-shell|indoxploit|marijuana|priv8|leafmailer\w{0,6}|uploader|bypass\w{0,6}|wp-conflg|wp-l0gin|0x\w{1,8}|madspot|anonymous\w{0,6}|symlink|cmd|gel4y|haxor|mini|fm|filesman|xleet\w{0,6}|zeus\w{0,6})\.php\d?$'
+    score: 40
+    severity: critical
+    confidence: high
+    category: WEBSHELL_SCAN
+    ttl: 172800
+
+  - id: short-php-probe
+    name: Sondas PHP cortas en raíz (/1.php, /x.php, /xx.php)
+    target: path
+    pattern: '^/(?:[a-z0-9]{1,2}|x{2,4}|tmp|temp|new|old|up|upl|simple)\.php$'
+    score: 15
+    severity: high
+    confidence: high
+    category: WEBSHELL_SCAN
+
+  - id: uploads-php-exec
+    name: Ejecutar PHP dentro de uploads (webshell subida)
+    target: path
+    pattern: '/wp-content/uploads/.*\.(?:php\d?|phtml|phar|pht|phps)$'
+    score: 40
+    severity: critical
+    confidence: high
+    category: WEBSHELL_SCAN
+    ttl: 172800
+
+  - id: wellknown-php
+    name: PHP dentro de .well-known (webshell típica)
+    target: path
+    pattern: '^/\.well-known/.*\.php\d?$'
+    score: 40
+    severity: critical
+    confidence: high
+    category: WEBSHELL_SCAN
+    ttl: 172800
+
+  - id: phpunit-rce
+    name: PHPUnit eval-stdin (CVE-2017-9841)
+    target: path
+    pattern: '/vendor/phpunit/|eval-stdin\.php'
+    score: 50
+    severity: critical
+    confidence: high
+    category: RCE
+    ttl: 172800
+
+  - id: exploit-paths
+    name: Rutas de exploits no-WordPress (Laravel, Spring, routers, Exchange…)
+    target: path
+    pattern: '^/(?:cgi-bin/|_ignition/|telescope/|actuator(?:/|$)|solr/|owa/|ecp/|autodiscover/|remote/login|boaform/|hnap1|jenkins|manager/html|jmx-console|invoker/|axis2|struts|druid/|geoserver|hudson|webui/|gponform|setup\.cgi|vpn/|global-protect/|sslvpn|dana-na/|console/?$|server-status|server-info|\.vscode/|containers/json|api/v1/pods|v2/_catalog)'
+    score: 30
+    severity: high
+    confidence: high
+    category: SCANNER
+    ttl: 86400
+
+  # ---------------------------------------------------------------------------
+  # WordPress: enumeración y exploits conocidos
+  # ---------------------------------------------------------------------------
+  - id: wp-install-probe
+    name: install.php / setup-config.php (WordPress ya instalado)
+    target: path
+    pattern: '/wp-admin/(?:install|setup-config)\.php$'
+    score: 15
+    severity: high
+    confidence: high
+    category: WP_SCAN
+
+  - id: wp-includes-php
+    name: PHP directo en wp-includes (raíz)
+    target: path
+    pattern: '^/(?:[\w-]+/)?wp-includes/[^/]+\.php$'
+    score: 10
+    severity: medium
+    confidence: high
+    category: WP_SCAN
+
+  - id: wp-user-enum-rest
+    name: Enumeración de usuarios vía REST
+    target: uri
+    pattern: '/wp-json/wp/v2/users|rest_route=%2Fwp%2Fv2%2Fusers|rest_route=/wp/v2/users'
+    score: 10
+    severity: medium
+    confidence: medium
+    category: WP_SCAN
+
+  - id: wp-user-enum-author
+    name: Enumeración de usuarios vía ?author=N
+    target: query
+    pattern: '(?:^|&)author=\d{1,6}(?:&|$)'
+    score: 5
+    severity: low
+    confidence: low
+    category: WP_SCAN
+
+  - id: wp-plugin-readme
+    name: Lectura de readme/changelog de plugins (fingerprinting)
+    target: path
+    pattern: '^/(?:[\w-]+/)?wp-content/(?:plugins|themes)/[^/]+/(?:readme|changelog|license)\.(?:txt|md|html)$'
+    score: 2
+    severity: low
+    confidence: low
+    category: WP_SCAN
+
+  - id: wp-plugin-direct-php
+    name: PHP directo en plugins/themes
+    target: path
+    pattern: '^/(?:[\w-]+/)?wp-content/(?:plugins|themes)/[^/]+/.*\.php\d?$'
+    score: 5
+    severity: medium
+    confidence: medium
+    category: WP_SCAN
+
+  - id: wlwmanifest
+    name: Fingerprinting (wlwmanifest.xml, readme.html, license.txt)
+    target: path
+    pattern: '(?:^|/)wlwmanifest\.xml$|^/(?:readme\.html|license\.txt|wp-config-sample\.php)$'
+    score: 5
+    severity: medium
+    confidence: medium
+    category: WP_SCAN
+
+  - id: xmlrpc-disabled
+    name: xmlrpc.php (deshabilitado en el sitio)
+    target: path
+    pattern: '(?:^|/)xmlrpc\.php$'
+    score: 5
+    severity: medium
+    confidence: medium
+    category: XMLRPC_ABUSE
+
+  - id: wp-known-plugin-exploits
+    name: Exploits conocidos de plugins WordPress (rutas)
+    target: path
+    pattern: '/wp-content/plugins/(?:wp-file-manager/lib/php/connector|revslider/temp/update_extract|showbiz/|simple-ads-manager/sam-ajax-admin|wp-mobile-detector/resize\.php|formcraft/file-upload|db-backup/download|wp-symposium/server/php|dzs-zoomsounds/savepng|cherry-plugin/admin/import-export/upload|wp-support-plus-responsive-ticket-system/includes/admin/downloadAttachment|work-the-flow-file-upload/public/assets/jQuery-File-Upload)'
+    score: 60
+    severity: critical
+    confidence: high
+    category: RCE
+    ttl: 172800
+
+  - id: wp-known-ajax-exploits
+    name: Exploits conocidos vía admin-ajax (acciones vulnerables)
+    target: query
+    pattern: '(?:^|&)action=(?:revslider_show_image|duplicator_download|kiwi_social_share_set_option|wpgdprc_process_action|td_ajax_fb_login_user|update_zb_fbc_code|ufbl_front_form_action)(?:&|$)'
+    score: 60
+    severity: critical
+    confidence: high
+    category: RCE
+    ttl: 172800
+
+  - id: wp-duplicator-installer
+    name: Instaladores Duplicator/backups expuestos
+    target: path
+    pattern: '(?:^|/)(?:installer|installer-backup|dup-installer/main\.installer)\.php$'
+    score: 30
+    severity: high
+    confidence: high
+    category: WP_SCAN
+
+  - id: timthumb
+    name: TimThumb con URL remota
+    target: uri
+    pattern: '(?:timthumb|thumb)\.php\?.{0,200}src=(?:https?|ftp)'
+    score: 30
+    severity: high
+    confidence: high
+    category: RCE
+
+  # ---------------------------------------------------------------------------
+  # Payloads: traversal, SQLi, XSS, RCE (sobre query decodificada o URI cruda)
+  # ---------------------------------------------------------------------------
+  - id: traversal
+    name: Path traversal
+    target: uri
+    pattern: '(?:\.\./|\.\.\\|%2e%2e(?:%2f|/|%5c)|\.\.%2f|%252e%252e|%c0%ae)'
+    score: 40
+    severity: high
+    confidence: high
+    category: TRAVERSAL
+    ttl: 86400
+
+  - id: traversal-targets
+    name: Lectura de archivos del sistema (/etc/passwd, win.ini…)
+    target: query
+    pattern: '/etc/(?:passwd|shadow|hosts)|/proc/self/(?:environ|cmdline)|win\.ini|boot\.ini'
+    score: 40
+    severity: critical
+    confidence: high
+    category: TRAVERSAL
+    action: block
+    ttl: 86400
+
+  - id: php-wrappers
+    name: Wrappers PHP (php://, phar://, expect://)
+    target: query
+    pattern: '(?:php|phar|zip|expect|glob|data):/{1,3}[a-z]'
+    score: 40
+    severity: high
+    confidence: high
+    category: RCE
+    ttl: 86400
+
+  - id: sqli-union
+    name: SQL injection UNION SELECT
+    target: query
+    pattern: 'union[\s+/*()]{1,30}(?:all[\s+/*()]{1,30})?select'
+    score: 40
+    severity: high
+    confidence: high
+    category: SQLI
+    ttl: 86400
+
+  - id: sqli-functions
+    name: SQL injection (funciones típicas)
+    target: query
+    pattern: 'information_schema|group_concat\(|concat\(0x|load_file\(|into\s+(?:out|dump)file|extractvalue\(|updatexml\(|benchmark\(\s*\d|sleep\(\s*\d{1,3}\s*\)|pg_sleep\(|waitfor\s+delay'
+    score: 40
+    severity: high
+    confidence: high
+    category: SQLI
+    ttl: 86400
+
+  - id: sqli-tautology
+    name: SQL injection (tautología ' or 1=1)
+    target: query
+    pattern: '[''"]\s*(?:or|and)\s+[''"]?\d{1,5}[''"]?\s*=\s*[''"]?\d{1,5}'
+    score: 30
+    severity: high
+    confidence: medium
+    category: SQLI
+
+  - id: xss-probe
+    name: XSS en query
+    target: query
+    pattern: '<\s*script|javascript\s*:|\bon(?:error|load|mouseover|focus|toggle|begin)\s*=|<\s*svg[^>]{0,40}\bon\w{2,20}\s*=|<\s*iframe|document\.cookie|alert\(|prompt\(|confirm\(\d'
+    score: 20
+    severity: medium
+    confidence: medium
+    category: XSS
+
+  - id: rce-log4shell
+    name: Log4Shell / JNDI
+    target: uri
+    pattern: '\$\{(?:jndi|\$\{|lower:|upper:|env:)|%24%7bjndi'
+    score: 60
+    severity: critical
+    confidence: high
+    category: RCE
+    action: block
+    ttl: 172800
+
+  - id: rce-command-injection
+    name: Inyección de comandos
+    target: query
+    pattern: '(?:;|\||&&|`|\$\()\s*(?:wget|curl|bash|sh|nc|ncat|python3?|perl|chmod|busybox|tftp|powershell)\s'
+    score: 60
+    severity: critical
+    confidence: high
+    category: RCE
+    action: block
+    ttl: 172800
+
+  - id: rce-php-functions
+    name: Funciones PHP peligrosas en query
+    target: query
+    pattern: '(?:base64_decode|eval|assert|system|passthru|shell_exec|proc_open|popen|call_user_func_array|file_put_contents|fwrite)\(|<\?php|allow_url_include|auto_prepend_file'
+    score: 60
+    severity: critical
+    confidence: high
+    category: RCE
+    action: block
+    ttl: 172800
+
+  - id: rce-shell-paths
+    name: Rutas de shell del sistema en query
+    target: query
+    pattern: '/bin/(?:ba|z|da)?sh\b|cmd\.exe|/dev/tcp/'
+    score: 60
+    severity: critical
+    confidence: high
+    category: RCE
+    action: block
+    ttl: 172800
+
+  # ---------------------------------------------------------------------------
+  # User-Agent y método
+  # ---------------------------------------------------------------------------
+  - id: scanner-ua
+    name: User-Agent de scanner conocido
+    target: ua
+    pattern: 'sqlmap|nikto|nmap|masscan|zgrab|nuclei|wpscan|acunetix|netsparker|dirbuster|gobuster|\bffuf\b|feroxbuster|wfuzz|whatweb|jaeles|openvas|nessus|burpcollaborator|interactsh|fuzz faster|l9explore|l9tcpid|censysinspect|expanse|paloaltonetworks'
+    score: 15
+    severity: high
+    confidence: high
+    category: SCANNER
+
+  - id: empty-ua
+    name: Sin User-Agent
+    target: ua
+    pattern: '^$'
+    score: 3
+    severity: low
+    confidence: low
+    category: BAD_BOT
+
+  - id: bad-method
+    name: Métodos HTTP inusuales
+    target: method
+    pattern: '^(?:TRACE|TRACK|CONNECT|PROPFIND|PROPPATCH|DEBUG|MOVE|COPY|LOCK|UNLOCK|MKCOL|SEARCH|INVALID)$'
+    flags: ''
+    score: 10
+    severity: medium
+    confidence: medium
+    category: SCANNER

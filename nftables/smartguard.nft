@@ -1,0 +1,77 @@
+#!/usr/sbin/nft -f
+# =============================================================================
+# /etc/smartguard/nftables/smartguard.nft — tabla INDEPENDIENTE de SmartGuard
+# =============================================================================
+# - No toca tus otras tablas (CloudPanel/ufw/nftables.conf). En nftables, varias tablas con el
+#   mismo hook conviven: un "drop" en cualquiera es definitivo; un "accept/return" aquí NO anula
+#   los drops de otras tablas. Por eso esta tabla SOLO descarta, nunca usa "policy drop":
+#   es imposible que te bloquee SSH o CloudPanel por error.
+# - Sets con timeout (los bans caducan solos) e interval (admite CIDR, p. ej. IPv6 /64).
+# - Las IPs de Cloudflare están en su propio set y NUNCA se descartan (sanity check).
+# - attackers_* solo recibe IPs TCP de conexiones DIRECTAS (no las de CF-Connecting-IP).
+#
+# Carga (idempotente; la re-carga vacía attackers_*, SmartGuard los re-sincroniza al arrancar):
+#   nft -c -f /etc/smartguard/nftables/smartguard.nft   # comprobar
+#   nft -f /etc/smartguard/nftables/smartguard.nft      # aplicar
+# =============================================================================
+
+table inet smartguard
+delete table inet smartguard
+
+table inet smartguard {
+
+    # IPs administrativas (nunca descartadas por esta tabla). Las rellena smartguard-fw-sync.
+    set trusted_v4 {
+        type ipv4_addr
+        flags interval
+        auto-merge
+    }
+    set trusted_v6 {
+        type ipv6_addr
+        flags interval
+        auto-merge
+    }
+
+    # Rangos oficiales de Cloudflare (update-cloudflare-ips.sh los actualiza de forma atómica)
+    set cloudflare_v4 {
+        type ipv4_addr
+        flags interval
+        auto-merge
+    }
+    set cloudflare_v6 {
+        type ipv6_addr
+        flags interval
+        auto-merge
+    }
+
+    # IPs TCP atacantes (directas al origen). Timeout = duración del ban.
+    set attackers_v4 {
+        type ipv4_addr
+        flags interval, timeout
+        size 65536
+    }
+    set attackers_v6 {
+        type ipv6_addr
+        flags interval, timeout
+        size 65536
+    }
+
+    chain input {
+        type filter hook input priority filter - 5; policy accept;
+
+        iif "lo" return
+        ip  saddr @trusted_v4 return
+        ip6 saddr @trusted_v6 return
+        ip  saddr @cloudflare_v4 return
+        ip6 saddr @cloudflare_v6 return
+
+        ip  saddr @attackers_v4 counter drop
+        ip6 saddr @attackers_v6 counter drop
+
+        # Protección del origen (vacía por defecto). scripts/origin-lock.sh enable la rellena.
+        jump origin_lock
+    }
+
+    chain origin_lock {
+    }
+}

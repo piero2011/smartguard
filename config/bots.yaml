@@ -1,0 +1,62 @@
+# =============================================================================
+# SmartGuard — bots (puntos 13 y 14). El User-Agent NO es identidad.
+# =============================================================================
+# verified: solo obtienen privilegios (nunca bloqueados) si pasan FCrDNS:
+#   IP → PTR → hostname ∈ domains → A/AAAA del hostname contiene la IP.
+#   Si el UA dice "Googlebot" pero la IP no verifica → "fake-bot" (+FAKE_BOT_SCORE, medium).
+#   verify: none → no se puede verificar por DNS (sin privilegios, sin penalización).
+#
+# bad: UAs no deseados. Nginx ya los bloquea (403) en maps del vhost; aquí suman puntos
+# en caso de que lleguen por otra vía. Listas configurables.
+# =============================================================================
+
+verified:
+  - id: google
+    name: Google (Googlebot, Inspection Tool, AdsBot, GoogleOther, Structured Data, Mediapartners, Storebot)
+    ua: 'googlebot|google-inspectiontool|googleother|adsbot-google|mediapartners-google|google-structured-data|storebot-google|google-extended|apis-google|feedfetcher-google|google-read-aloud|google-site-verification'
+    verify: fcrdns
+    domains: [googlebot.com, google.com, googleusercontent.com]
+
+  - id: bing
+    name: Bingbot / BingPreview / AdIdxBot
+    ua: 'bingbot|bingpreview|adidxbot|msnbot'
+    verify: fcrdns
+    domains: [search.msn.com]
+
+  - id: apple
+    name: Applebot
+    ua: 'applebot'
+    verify: fcrdns
+    domains: [applebot.apple.com]
+
+  # DuckDuckBot no publica PTR verificable: publica una lista de IPs. Sin privilegios (verify: none).
+  - id: duckduckgo
+    name: DuckDuckBot
+    ua: 'duckduckbot|duckassistbot'
+    verify: none
+    domains: []
+
+  # Meta/Facebook/WhatsApp: se verifican por ASN (AS32934), no por PTR. Sin privilegios en SmartGuard;
+  # Nginx les aplica su zona propia (botzone). NO se penalizan por el UA.
+  - id: meta
+    name: Meta (facebookexternalhit, meta-externalagent, WhatsApp, FBAN)
+    ua: 'facebookexternalhit|facebookcatalog|meta-externalagent|meta-externalfetcher|whatsapp|\bfban\b'
+    verify: none
+    domains: []
+
+  # Customily: servicio de terceros. Si conoces sus IPs, añádelas a SERVICE_ALLOWLIST.
+  - id: customily
+    name: Customily
+    ua: 'app\.customily\.com|sh\.customily\.com'
+    verify: none
+    domains: []
+
+bad:
+  - { id: ahrefs,   ua: 'ahrefsbot',   score: 15, confidence: medium, category: BAD_BOT }
+  - { id: semrush,  ua: 'semrushbot',  score: 15, confidence: medium, category: BAD_BOT }
+  - { id: mj12,     ua: 'mj12bot',     score: 15, confidence: medium, category: BAD_BOT }
+  - { id: baidu,    ua: 'baiduspider', score: 15, confidence: medium, category: BAD_BOT }
+  - { id: yandex,   ua: 'yandexbot',   score: 15, confidence: medium, category: BAD_BOT }
+  - { id: dotbot,   ua: '\bdotbot\b',  score: 10, confidence: low,    category: BAD_BOT }
+  - { id: scrapy,   ua: 'scrapy',      score: 10, confidence: low,    category: BAD_BOT }
+  - { id: pyurllib, ua: 'python-urllib', score: 10, confidence: low,  category: BAD_BOT }

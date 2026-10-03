@@ -1,0 +1,16 @@
+# /etc/logrotate.d/smartguard-nginx — log JSON de SmartGuard escrito por Nginx
+# (los logs del servicio SmartGuard van a journald: journalctl -u smartguard)
+/var/log/nginx/smartguard/*.json {
+    daily
+    rotate 7
+    maxsize 200M
+    missingok
+    notifempty
+    compress
+    delaycompress
+    create 0640 root adm
+    sharedscripts
+    postrotate
+        if [ -f /run/nginx.pid ]; then kill -USR1 "$(cat /run/nginx.pid)"; fi
+    endscript
+}

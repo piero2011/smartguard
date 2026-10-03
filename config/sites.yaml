@@ -1,0 +1,59 @@
+# =============================================================================
+# SmartGuard — sitios protegidos (puntos 56 y 57)
+# =============================================================================
+# Hosts NO listados se evalúan con las reglas globales y se registran como "_unknown"
+# (el Host del cliente nunca se usa como clave interna).
+#
+# Por sitio:
+#   aliases      otros server_name del mismo sitio
+#   wordpress / multisite / woocommerce / xmlrpc
+#   rules.disabled   ids de reglas globales desactivadas en este sitio
+#   rules.overrides  cambios sobre reglas globales (score, enabled, action, confidence)
+#   rules.extra      reglas propias; si usan el id de una global, la REEMPLAZAN
+#
+# xmlrpc: true → la regla "xmlrpc-disabled" no aplica (y en Nginx debes usar la variante
+# de xmlrpc con zona sg_xmlrpc).
+# =============================================================================
+
+defaults:
+  wordpress: true
+  multisite: false
+  woocommerce: false
+  xmlrpc: false
+
+sites:
+  orleansembroidery.com:
+    aliases: [www.orleansembroidery.com, www1.orleansembroidery.com]
+    wordpress: true
+    multisite: true
+    woocommerce: true
+    xmlrpc: false
+    rules:
+      disabled: []
+      overrides: {}
+      # Ejemplo de regla propia del sitio (desactivada):
+      extra:
+        - id: orleans-example
+          name: Ejemplo de regla por sitio
+          enabled: false
+          target: path
+          pattern: '^/ruta-que-nunca-existe-ejemplo/'
+          score: 5
+          severity: low
+          confidence: low
+          category: UNKNOWN
+
+  # hispanidad.orleansembroidery.com:
+  #   wordpress: true
+  #   multisite: false
+  #   woocommerce: false
+
+  # tienda2.com:
+  #   aliases: [www.tienda2.com]
+  #   wordpress: true
+  #   multisite: false
+  #   woocommerce: true
+  #   xmlrpc: false
+  #   rules:
+  #     overrides:
+  #       wp-user-enum-author: { enabled: false }

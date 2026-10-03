@@ -1,0 +1,9 @@
+# /etc/systemd/system/smartguard-cf-ips.service
+[Unit]
+Description=SmartGuard: actualizar rangos de IP de Cloudflare (realip Nginx + nftables + SmartGuard)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/smartguard/scripts/update-cloudflare-ips.sh

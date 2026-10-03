@@ -1,0 +1,247 @@
+#!/usr/bin/env bash
+# =============================================================================
+# smartguard — CLI de administración (punto 84). Habla con la API local (127.0.0.1) usando el
+# ADMIN_TOKEN de /etc/smartguard/smartguard.env (por eso requiere sudo).
+# =============================================================================
+set -Eeuo pipefail
+LIB=/opt/smartguard/scripts/lib
+# shellcheck source=../scripts/lib/common.sh
+. "$LIB/common.sh"
+# shellcheck source=../scripts/lib/nginx-gen.sh
+. "$LIB/nginx-gen.sh"
+
+usage() {
+  cat <<'EOF'
+Uso: sudo smartguard <comando> [args]
+
+  status                      Estado del servicio, modo, Redis, bans y tráfico
+  ip <IP>                     Explica el score/estado de una IP (¿por qué fue bloqueada?)
+  ban <IP> [duración] [motivo]   Ban manual (duración: 900, 15m, 1h, 2d; por defecto 1h)
+  unban <IP> [--keep-score]   Desbloquea: ban de IP y de huellas, nftables, Cloudflare y (por
+                              defecto) resetea score/motivos para que no se re-banee al instante
+  allow <valor> [tipo] [nota] Allowlist de CLIENTES. valor = IP, CIDR, dominio (app.x.com → sus IPs)
+                              o subdominios (*.x.com → verificación FCrDNS). Si es una IP, la desbloquea.
+                              tipo: ADMIN_ALLOWLIST (defecto) | SERVICE_ALLOWLIST | TRUSTED_NETWORK
+  allow-host <dominio> [nota] Exime un sitio/subdominio DESTINO (p. ej. api.x.com o *.dev.x.com)
+  unallow <valor>             Quita de la allowlist (clientes o hosts)
+  allowlist                   Muestra la allowlist (estática, dinámica y dominios resueltos)
+  lookup <valor>              ¿Dónde está? IP/CIDR/dominio/*.dominio/URL: en qué lista, si está bloqueada, score
+  bans [--audit]              Lista de bans activos (o would-bans de AUDIT)
+  events [N]                  Últimos N eventos de seguridad (por defecto 30)
+  report                      Informe de AUDIT: qué se habría bloqueado y posibles falsos positivos
+  rules reload                Recarga rules.yaml / sites.yaml / bots.yaml sin reiniciar
+  audit on|off|status         AUDIT (solo registra) / ENFORCE (bloquea): SmartGuard + reglas Nginx
+  killswitch on|off           Emergencia: Nginx deja de consultar a SmartGuard (fail-open total)
+  nginx-sync                  Regenera allowlist.conf y secret.conf desde el .env y recarga Nginx
+  nginx-enable                Reactiva SmartGuard en Nginx tras rollback-nginx.sh --disable
+  fw-sync                     Sincroniza sets nftables (trusted, cloudflare)
+  logs                        journalctl -u smartguard -f
+EOF
+}
+
+require_root
+[ -r "$SG_ENV" ] || die "No se puede leer $SG_ENV"
+PORT=$(env_get PORT); PORT=${PORT:-3100}
+API="http://127.0.0.1:$PORT"
+NODE=$(node_bin)
+
+HDR=$(mktemp); chmod 600 "$HDR"; trap 'rm -f "$HDR"' EXIT
+printf 'Authorization: Bearer %s\n' "$(env_get ADMIN_TOKEN)" >"$HDR"
+
+api() { # api METHOD PATH [JSON]
+  local m=$1 p=$2 body=${3:-}
+  if [ -n "$body" ]; then
+    curl -sS --max-time 10 -X "$m" -H @"$HDR" -H 'content-type: application/json' --data-binary "$body" "$API$p"
+  else
+    curl -sS --max-time 10 -X "$m" -H @"$HDR" "$API$p"
+  fi
+}
+pretty() { "$NODE" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.stringify(JSON.parse(s),null,2))}catch{console.log(s)}})'; }
+json() { "$NODE" -e 'const a=process.argv.slice(1);const o={};for(let i=0;i<a.length;i+=2){let v=a[i+1];if(v==="true")v=true;else if(v==="false")v=false;if(v!=="")o[a[i]]=v}console.log(JSON.stringify(o))' "$@"; }
+valid_ip() { [[ "$1" =~ ^[0-9a-fA-F:.]{2,45}(/[0-9]{1,3})?$ ]] || die "IP/CIDR inválida: $1"; }
+valid_allow() { [[ "$1" =~ ^([0-9a-fA-F:.]{2,45}(/[0-9]{1,3})?|(\*\.)?[A-Za-z0-9.-]{3,253}|https?://[^[:space:]]{3,2000})$ ]] || die "Valor inválido (IP, CIDR, dominio, *.dominio o URL): $1"; }
+
+current_enforce() { grep -A1 'sg_nginx_enforce' "$NGX_SG/mode.conf" 2>/dev/null | grep -oE 'default [01]' | grep -oE '[01]' || echo 0; }
+current_ks() { grep -A1 'sg_killswitch' "$NGX_SG/mode.conf" 2>/dev/null | grep -oE 'default [01]' | grep -oE '[01]' || echo 0; }
+
+apply_nginx_mode() { # $1 audit|enforce  $2 on|off (killswitch)
+  local bak; bak=$(mktemp -d)
+  cp -a "$NGX_SG/mode.conf" "$NGX_SG/limits-mode.conf" "$bak/" 2>/dev/null || true
+  gen_mode_conf "$1" "$2" | write_file "$NGX_SG/mode.conf" 0644
+  gen_limits_mode_conf "$1" | write_file "$NGX_SG/limits-mode.conf" 0644
+  if ! nginx_safe_reload; then
+    cp -a "$bak/"*.conf "$NGX_SG/"; rm -rf "$bak"
+    die "Nginx rechazó el cambio de modo; restaurado el anterior."
+  fi
+  rm -rf "$bak"
+}
+
+cmd=${1:-help}; shift || true
+case "$cmd" in
+  status)
+    systemctl --no-pager --lines=0 status smartguard | head -n 3 || true
+    echo "--- health"; curl -sS --max-time 3 "$API/health" | pretty || warn "SmartGuard no responde (Nginx sigue funcionando en fail-open)"
+    echo "--- Nginx: reglas nuevas=$([ "$(current_enforce)" = 1 ] && echo ENFORCE || echo AUDIT) · killswitch=$([ "$(current_ks)" = 1 ] && echo ON || echo off)"
+    echo "--- últimos 60 min"
+    api GET "/admin/stats?minutes=60" | "$NODE" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);const t=j.totals||{};
+      console.log(`modo=${j.mode} decisiones/min=${j.requestsPerMin} IPs activas(5m)=${j.activeIps5m} bans=${j.bansActive} would-bans=${j.wouldBansActive} redis_degradado=${j.degraded}`);
+      console.log(`403 SG=${t.blocked_403||0} 429 SG=${t.limited_429||0} would_block=${t.would_block||0} would_rate_limit=${t.would_rate_limit||0} php_evitado=${t.php_avoided||0} 403 nginx=${t.log_403||0} 429 nginx=${t.log_429||0}`);})' || true
+    ;;
+
+  ip)
+    [ $# -ge 1 ] || die "Uso: smartguard ip <IP>"; valid_ip "$1"
+    api GET "/admin/ip/$1" | "$NODE" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);if(j.explanation){console.log(j.explanation);if(j.ban)console.log("\nBan:",JSON.stringify(j.ban,null,2))}else console.log(JSON.stringify(j,null,2))})'
+    ;;
+
+  ban)
+    [ $# -ge 1 ] || die "Uso: smartguard ban <IP> [duración] [motivo]"; valid_ip "$1"
+    ip=$1; dur=${2:-1h}; shift; shift || true; reason="${*:-cli}"
+    [[ "$dur" =~ ^[0-9]{1,7}[smhdw]?$ ]] || die "Duración inválida: $dur"
+    api POST /admin/ban "$(json ip "$ip" duration "$dur" reason "$reason")" | pretty
+    ;;
+
+  unban)
+    [ $# -ge 1 ] || die "Uso: smartguard unban <IP> [--keep-score]"; valid_ip "$1"
+    q=""; [ "${2:-}" = --keep-score ] && q="?reset=false"
+    api DELETE "/admin/ban/$1$q" | pretty
+    ;;
+
+  allow)
+    [ $# -ge 1 ] || die "Uso: smartguard allow <IP|CIDR|dominio|*.dominio> [tipo] [nota]"; valid_allow "$1"
+    value=$1; type=${2:-ADMIN_ALLOWLIST}; shift; shift || true; note="${*:-cli}"
+    case "$type" in ADMIN_ALLOWLIST|SERVICE_ALLOWLIST|TRUSTED_NETWORK) ;; *) die "tipo inválido: $type" ;; esac
+    api POST /admin/allow "$(json value "$value" type "$type" target client note "$note")" | pretty
+    log "Recuerda: 'smartguard nginx-sync' para eximirla también de los límites de Nginx (IPs y dominios exactos)."
+    ;;
+
+  allow-host)
+    [ $# -ge 1 ] || die "Uso: smartguard allow-host <dominio|*.dominio> [nota]"; valid_allow "$1"
+    value=$1; shift; note="${*:-cli}"
+    api POST /admin/allow "$(json value "$value" type SERVICE_ALLOWLIST target host note "$note")" | pretty
+    log "Ese host ya no se puntúa en SmartGuard. Si es un vhost propio, lo ideal es NO incluir los snippets de SmartGuard en él."
+    ;;
+
+  unallow)
+    [ $# -ge 1 ] || die "Uso: smartguard unallow <valor>"; valid_allow "$1"
+    api DELETE "/admin/allow/$("$NODE" -p 'encodeURIComponent(process.argv[1])' "$1")" | pretty
+    ;;
+
+  allowlist)
+    api GET /admin/allow | pretty
+    ;;
+
+  lookup)
+    [ $# -ge 1 ] || die "Uso: smartguard lookup <IP|CIDR|dominio|*.dominio|URL>"; valid_allow "$1"
+    api GET "/admin/lookup?value=$("$NODE" -p 'encodeURIComponent(process.argv[1])' "$1")" | "$NODE" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);
+      if(j.code){console.log(j.message);process.exit(1)}
+      console.log(`${j.normalized}${j.key&&j.key!==j.normalized?" (clave "+j.key+")":""}`);
+      if(j.isCloudflare)console.log("  ⚠ IP de Cloudflare: no bloquear");
+      if(j.allowlisted){console.log("  ✔ YA está en la lista blanca:");for(const m of j.allowlist)console.log(`     - ${m.list} [${m.value}] origen=${m.source} (${m.matchedBy}${m.detail?": "+m.detail:""})${m.note?" nota: "+m.note:""}`)}
+      if(j.ban)console.log(`  ✖ BLOQUEADA hasta ${new Date(j.ban.expiresAt).toISOString()} — ${j.ban.reason}`);
+      if(!j.ban&&j.auditBan)console.log(`  ~ En AUDIT se bloquearía hasta ${new Date(j.auditBan.expiresAt).toISOString()}`);
+      if(j.fingerprintBans)console.log(`  ✖ ${j.fingerprintBans} bloqueo(s) por huella IP+UA`);
+      if(!j.allowlisted&&!j.ban&&!j.auditBan&&!j.fingerprintBans)console.log("  · No está en ninguna lista");
+      if(j.score!==null)console.log(`  score: ${j.score}`)})'
+    ;;
+
+  bans)
+    q="audit=false"; [ "${1:-}" = --audit ] && q="audit=true"
+    api GET "/admin/bans?$q&limit=200" | "$NODE" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);
+      console.log(`${j.audit?"WOULD-BANS (AUDIT)":"BANS ACTIVOS"}: ${j.total}`);
+      for(const b of j.items)console.log(`${b.key.padEnd(40)} score=${String(b.score).padEnd(7)} x${b.banCount} ${b.scope} ${b.source.padEnd(9)} hasta ${new Date(b.expiresAt).toISOString()}  ${b.reason}`)})'
+    ;;
+
+  events)
+    n=${1:-30}; [[ "$n" =~ ^[0-9]{1,4}$ ]] || die "N inválido"
+    api GET "/admin/events?limit=$n" | "$NODE" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{for(const e of JSON.parse(s))console.log(`${new Date(e.timestamp).toISOString()} ${String(e.action||"").padEnd(18)} ${e.ip.padEnd(39)} ${e.method} ${e.uri} [${e.category} +${e.scoreDelta}] ${e.reason}`)})'
+    ;;
+
+  report)
+    echo "=== Informe AUDIT (últimas 24 h) ==="
+    api GET "/admin/stats?minutes=1440" | "$NODE" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);const t=j.totals||{};
+      console.log(`Decisiones: ${t.requests||0} · WOULD_BLOCK: ${t.would_block||0} · WOULD_RATE_LIMIT: ${t.would_rate_limit||0} · would-bans: ${t.would_ban||0} · PHP evitado: ${t.php_avoided||0}`);
+      console.log("\nTop reglas:");for(const r of j.topRules)console.log(`  ${String(r.score).padStart(6)}  ${r.member}`);
+      console.log("\nTop rutas de ataque:");for(const r of j.topPaths)console.log(`  ${String(r.score).padStart(6)}  ${r.member}`);
+      console.log("\nTop IPs (puntos):");for(const r of j.topIps)console.log(`  ${String(r.score).padStart(6)}  ${r.member}`);})' || true
+    echo; "$0" bans --audit || true
+    echo; echo "=== Log Nginx: reglas nuevas (nb) y límites en dry-run (posibles falsos positivos) ==="
+    "$NODE" - "$SG_LOGDIR" <<'JS'
+const fs = require('fs'), path = require('path');
+const dir = process.argv[2];
+const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter(f => /^access\.json(\.1)?$/.test(f)).map(f => path.join(dir, f)) : [];
+const nb = new Map(), nbPaths = new Map(), dry = new Map(), dryUa = new Map(), ua403 = new Map();
+const inc = (m, k, n = 1) => m.set(k, (m.get(k) || 0) + n);
+for (const f of files) for (const line of fs.readFileSync(f, 'utf8').split('\n')) {
+  if (!line) continue; let r; try { r = JSON.parse(line); } catch { continue; }
+  if (r.nb) { inc(nb, r.nb); inc(nbPaths, `${r.nb}  ${r.p}`); }
+  if (r.lr === 'REJECTED_DRY_RUN' || r.lc === 'REJECTED_DRY_RUN') { inc(dry, r.ip); inc(dryUa, `${r.ip}  ${String(r.ua).slice(0, 60)}`); }
+  if (r.st === 403 && /guzzle/i.test(r.ua || '')) inc(ua403, `${r.ip}  ${r.ua}`);
+}
+const top = (m, n = 15) => [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, n);
+console.log('Reglas Nginx nuevas que habrían bloqueado (nb):'); for (const [k, v] of top(nb)) console.log(`  ${String(v).padStart(6)}  ${k}`);
+console.log('\nRutas por regla (revisa que ninguna sea legítima):'); for (const [k, v] of top(nbPaths, 30)) console.log(`  ${String(v).padStart(6)}  ${k}`);
+console.log('\nIPs que habrían recibido 429 de Nginx (¿NAT/oficina/servicio? → allowlist):'); for (const [k, v] of top(dryUa, 20)) console.log(`  ${String(v).padStart(6)}  ${k}`);
+console.log('\nGuzzleHttp bloqueado por tu lista de bots (¿integraciones?):'); for (const [k, v] of top(ua403, 10)) console.log(`  ${String(v).padStart(6)}  ${k}`);
+JS
+    ;;
+
+  rules)
+    [ "${1:-}" = reload ] || die "Uso: smartguard rules reload"
+    api POST /admin/rules/reload | pretty
+    ;;
+
+  audit)
+    case "${1:-status}" in
+      status) api GET /admin/mode | pretty; echo "Nginx reglas nuevas: $([ "$(current_enforce)" = 1 ] && echo ENFORCE || echo AUDIT)" ;;
+      on)
+        api POST /admin/mode '{"audit":true}' | pretty
+        env_set AUDIT_MODE true
+        apply_nginx_mode audit "$([ "$(current_ks)" = 1 ] && echo on || echo off)"
+        ok "AUDIT activado: SmartGuard y las reglas Nginx nuevas solo registran."
+        ;;
+      off)
+        warn "ENFORCE: SmartGuard bloqueará (403), los límites Nginx devolverán 429 y las reglas Nginx nuevas 403."
+        warn "¿Revisaste 'smartguard report' tras 24–72 h en AUDIT y añadiste tus IPs/servicios a la allowlist?"
+        confirm "¿Activar ENFORCE?" || die "Cancelado."
+        api POST /admin/mode '{"audit":false}' | pretty
+        env_set AUDIT_MODE false
+        apply_nginx_mode enforce "$([ "$(current_ks)" = 1 ] && echo on || echo off)"
+        ok "ENFORCE activado. Volver atrás: sudo smartguard audit on"
+        ;;
+      *) die "Uso: smartguard audit on|off|status" ;;
+    esac
+    ;;
+
+  killswitch)
+    mode=$([ "$(current_enforce)" = 1 ] && echo enforce || echo audit)
+    case "${1:-}" in
+      on) apply_nginx_mode "$mode" on; warn "KILLSWITCH ON: Nginx ya no consulta a SmartGuard (las reglas Nginx siguen activas)." ;;
+      off) apply_nginx_mode "$mode" off; ok "Killswitch desactivado: Nginx vuelve a consultar a SmartGuard." ;;
+      *) die "Uso: smartguard killswitch on|off" ;;
+    esac
+    ;;
+
+  nginx-sync)
+    extra=$(api GET /admin/allow 2>/dev/null | "$NODE" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{for(const e of JSON.parse(s).dynamic||[])if((e.target||"client")==="client")console.log(e.value||e.cidr)}catch{}})' || true)
+    bak=$(mktemp -d); cp -a "$NGX_SG/allowlist.conf" "$NGX_SG/secret.conf" "$bak/" 2>/dev/null || true
+    gen_allowlist_conf "$extra" | write_file "$NGX_SG/allowlist.conf" 0644
+    gen_secret_conf | write_file "$NGX_SG/secret.conf" 0600 root:root
+    if ! nginx_safe_reload; then cp -a "$bak/"*.conf "$NGX_SG/"; rm -rf "$bak"; die "Restaurado el estado anterior."; fi
+    rm -rf "$bak"
+    if command -v nft >/dev/null && nft list table inet smartguard >/dev/null 2>&1; then "$SG_FWSYNC" || true; fi
+    ;;
+
+  nginx-enable)
+    if [ -d "$NGX_SG/disabled-originals" ]; then
+      cp -a "$NGX_SG/disabled-originals/"*.conf "$NGX_SG/"
+    else
+      for f in server.conf auth.conf auth-php.conf static-log.conf; do install -m 0644 "$SG_OPT/nginx/smartguard/$f" "$NGX_SG/$f"; done
+    fi
+    nginx_safe_reload && rm -rf "$NGX_SG/disabled-originals" && ok "SmartGuard reactivado en Nginx"
+    ;;
+
+  fw-sync) "$SG_FWSYNC" ;;
+  logs) exec journalctl -u smartguard -f ;;
+  help|-h|--help) usage ;;
+  *) usage; exit 1 ;;
+esac

@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# =============================================================================
+# /usr/local/sbin/smartguard-fw-sync — rellena los sets trusted_* y cloudflare_* de la tabla
+# "inet smartguard" (root; lo ejecuta smartguard-nft.service y `smartguard fw-sync`).
+# Fuente: ADMIN_ALLOWLIST, SERVICE_ALLOWLIST, TRUSTED_NETWORKS del .env y cloudflare-ips.txt.
+# Cada entrada se valida estrictamente; todo se aplica en UNA transacción nft.
+# Si existe /etc/smartguard/nftables/origin-lock.enabled, re-aplica el bloqueo de origen.
+# =============================================================================
+set -Eeuo pipefail
+SG_LIB=/opt/smartguard/scripts/lib
+# shellcheck source=lib/common.sh
+. "$SG_LIB/common.sh"
+require_root
+command -v nft >/dev/null || die "nft no instalado"
+nft list table inet smartguard >/dev/null 2>&1 || die "La tabla inet smartguard no existe (systemctl start smartguard-nft)"
+
+v4=(); v6=()
+while read -r e; do
+  if is_cidr_v4 "$e"; then v4+=("$e"); elif is_cidr_v6 "$e"; then v6+=("${e,,}"); fi
+done < <(allowlist_entries)
+
+cf4=(); cf6=()
+if [ -r "$SG_ETC/cloudflare-ips.txt" ]; then
+  while read -r e; do
+    [[ -z "$e" || "$e" == \#* ]] && continue
+    if is_cidr_v4 "$e"; then cf4+=("$e"); elif is_cidr_v6 "$e"; then cf6+=("${e,,}"); fi
+  done <"$SG_ETC/cloudflare-ips.txt"
+fi
+
+join() { local IFS=,; echo "$*"; }
+BATCH=$(mktemp)
+trap 'rm -f "$BATCH"' EXIT
+{
+  echo "flush set inet smartguard trusted_v4"
+  echo "flush set inet smartguard trusted_v6"
+  [ ${#v4[@]} -gt 0 ] && echo "add element inet smartguard trusted_v4 { $(join "${v4[@]}") }"
+  [ ${#v6[@]} -gt 0 ] && echo "add element inet smartguard trusted_v6 { $(join "${v6[@]}") }"
+  if [ ${#cf4[@]} -gt 0 ] && [ ${#cf6[@]} -gt 0 ]; then
+    echo "flush set inet smartguard cloudflare_v4"
+    echo "flush set inet smartguard cloudflare_v6"
+    echo "add element inet smartguard cloudflare_v4 { $(join "${cf4[@]}") }"
+    echo "add element inet smartguard cloudflare_v6 { $(join "${cf6[@]}") }"
+  fi
+} >"$BATCH"
+
+if [ "$DRY_RUN" = true ]; then cat "$BATCH"; exit 0; fi
+nft -c -f "$BATCH" && nft -f "$BATCH"
+ok "nftables: trusted v4=${#v4[@]} v6=${#v6[@]} · cloudflare v4=${#cf4[@]} v6=${#cf6[@]}"
+
+if [ -f "$SG_ETC/nftables/origin-lock.enabled" ]; then
+  nft -f "$SG_ETC/nftables/origin-lock.nft" && ok "origin-lock re-aplicado"
+fi

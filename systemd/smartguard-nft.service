@@ -1,0 +1,18 @@
+# /etc/systemd/system/smartguard-nft.service
+# Carga la tabla "inet smartguard" al arrancar (después del firewall del sistema).
+# Solo se instala si se activa nftables. No usa policy drop: no puede bloquear SSH.
+[Unit]
+Description=SmartGuard nftables table (inet smartguard)
+After=nftables.service network-pre.target
+Before=smartguard.service
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/smartguard/nftables/smartguard.nft
+ExecStartPost=/usr/local/sbin/smartguard-fw-sync
+ExecStop=/usr/sbin/nft delete table inet smartguard
+
+[Install]
+WantedBy=multi-user.target

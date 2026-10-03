@@ -1,0 +1,62 @@
+# /etc/systemd/system/smartguard.service
+[Unit]
+Description=SmartGuard - motor de decisión de seguridad para WordPress/WooCommerce (Nginx auth_request)
+Documentation=file:///opt/smartguard/README.md
+After=network-online.target redis-server.service
+Wants=network-online.target
+# Si SmartGuard cae, Nginx hace fail-open: la tienda sigue funcionando.
+StartLimitIntervalSec=300
+StartLimitBurst=20
+
+[Service]
+Type=simple
+User=smartguard
+Group=smartguard
+# Lectura del log JSON de Nginx (/var/log/nginx/smartguard, grupo adm)
+SupplementaryGroups=adm
+WorkingDirectory=/opt/smartguard
+EnvironmentFile=/etc/smartguard/smartguard.env
+Environment=NODE_ENV=production
+# NODE_BIN lo sustituye install.sh por la ruta real de node (nunca en /home: ProtectHome)
+ExecStart=/usr/bin/node --enable-source-maps --max-old-space-size=256 dist/main.js
+Restart=always
+RestartSec=2
+TimeoutStopSec=15
+KillSignal=SIGTERM
+LimitNOFILE=65536
+
+# ---- Hardening (sin privilegios) ----
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/smartguard
+ReadOnlyPaths=/etc/smartguard -/var/log/nginx/smartguard
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RemoveIPC=true
+# AF_NETLINK solo lo necesita nft (drop-in nftables.conf)
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+# Sin capacidades por defecto. El drop-in smartguard.service.d/nftables.conf añade SOLO CAP_NET_ADMIN.
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0027
+# Node JIT necesita memoria ejecutable: NO usar MemoryDenyWriteExecute
+MemoryMax=512M
+TasksMax=256
+
+[Install]
+WantedBy=multi-user.target
