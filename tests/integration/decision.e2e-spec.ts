@@ -289,7 +289,16 @@ describe('AUDIT_MODE=true (instalación inicial)', () => {
     expect((await admin('DELETE', '/admin/blocked-bots?pattern=dotbot')).statusCode).toBe(404);
 
     // IP
-    expect((await admin('POST', '/admin/ban', { ip: '198.51.100.91', duration: '1h' })).statusCode).toBe(201);
+    // "hasta que se desbloquee" = 10 años (3650d); una duración mayor se recorta a ese máximo
+    const year = 365 * 86_400_000;
+    const forever = await admin('POST', '/admin/ban', { ip: '198.51.100.91', duration: '3650d' });
+    expect(forever.statusCode).toBe(201);
+    expect(forever.json().expiresAt - Date.now()).toBeGreaterThan(9.9 * year);
+    const capped = await admin('POST', '/admin/ban', { ip: '198.51.100.92', duration: '9999999w' });
+    expect(capped.json().expiresAt - Date.now()).toBeLessThan(10.1 * year);
+    expect((await admin('GET', '/admin/bans')).json().items.map((b: { key: string }) => b.key)).toEqual(
+      expect.arrayContaining(['198.51.100.91', '198.51.100.92']),
+    );
     expect((await decide('198.51.100.91', 'Mozilla/5.0 Test')).statusCode).toBe(403);
     expect((await admin('DELETE', '/admin/ban/198.51.100.91')).statusCode).toBe(200);
     expect((await decide('198.51.100.91', 'Mozilla/5.0 Test')).statusCode).toBe(200);

@@ -1,7 +1,7 @@
 import { Component, computed, effect, inject, signal } from '@angular/core';
-import { AllowList, Api, ApiErr, BanRecord, BlockedBot, SecurityEvent, Stats } from './api.service';
+import { AllowList, Api, ApiErr, BanRecord, BlockedBot, SecurityEvent, Stats, isPermanent } from './api.service';
 import { I18n, TPipe } from './i18n';
-import { EventFilter, Ui } from './ui';
+import { BlockActions, EventFilter, Ui } from './ui';
 import { IpComponent } from './ipinfo';
 
 /** Resumen: tarjetas + top rutas / IPs / reglas */
@@ -27,7 +27,8 @@ import { IpComponent } from './ipinfo';
         <table><tr><th>IP</th><th class="num">{{ 'ov.points' | t }}</th><th></th></tr>
           @for (r of s.topIps; track r.member) {
             <tr><td class="ip"><sg-ip [ip]="r.member" /></td><td class="num">{{ r.score }}</td>
-              <td><button class="small" (click)="inspect(r.member)">{{ 'common.inspect' | t }}</button></td></tr>
+              <td class="actions"><button class="small" (click)="inspect(r.member)">{{ 'common.inspect' | t }}</button>
+                <button class="small danger" (click)="actions.blockIp(r.member)">{{ 'ev.blockIp' | t }}</button></td></tr>
           } @empty { <tr><td colspan="3" class="muted">{{ 'common.none' | t }}</td></tr> }
         </table></section>
       <section class="card"><h2>{{ 'ov.topRules' | t }}</h2>
@@ -44,6 +45,7 @@ import { IpComponent } from './ipinfo';
 export class OverviewComponent {
   private readonly api = inject(Api);
   readonly ui = inject(Ui);
+  readonly actions = inject(BlockActions);
   readonly stats = signal<Stats | null>(null);
 
   constructor() {
@@ -109,7 +111,7 @@ export class OverviewComponent {
         <tr>
           <td class="ip"><sg-ip [ip]="b.scope === 'ip' ? b.key : b.ip" /></td><td class="num">{{ b.score }}</td><td>{{ b.reason }}</td>
           <td>{{ b.scope === 'ip' ? 'IP' : 'IP+UA' }}</td><td>{{ b.source }}</td><td class="num">{{ b.banCount }}</td>
-          <td>{{ i18n.date(b.createdAt) }}</td><td>{{ i18n.date(b.expiresAt) }}</td>
+          <td>{{ i18n.date(b.createdAt) }}</td><td>{{ permanent(b.expiresAt) ? ('bl.never' | t) : i18n.date(b.expiresAt) }}</td>
           <td><span class="pill" [class.audit]="b.audit" [class.enforce]="!b.audit">{{ b.audit ? 'AUDIT' : 'ENFORCE' }}</span></td>
           <td class="actions">
             <button class="small" (click)="inspect(b.ip)">{{ 'common.inspect' | t }}</button>
@@ -127,6 +129,7 @@ export class BansComponent {
   readonly i18n = inject(I18n);
   readonly items = signal<BanRecord[]>([]);
   readonly showAudit = this.ui.showAuditBans;
+  readonly permanent = isPermanent;
 
   constructor() {
     effect(() => {
@@ -401,6 +404,7 @@ export class EventsComponent {
   readonly ui = inject(Ui);
   readonly i18n = inject(I18n);
   readonly events = signal<SecurityEvent[]>([]);
+  private readonly actions = inject(BlockActions);
   readonly filters: EventFilter[] = ['all', 'log', 'suspicious', 'wouldBlock', 'blocked', 'limited', 'st403', 'st429', 'denied'];
 
   /** Eventos que pasan el filtro elegido y el texto buscado (IP, ruta, motivo, host o User-Agent). */
@@ -435,16 +439,9 @@ export class EventsComponent {
     return e.action === 'WOULD_BLOCK' || e.action === 'WOULD_RATE_LIMIT';
   }
 
-  /** Bloquea la IP del evento 24 h: vale para todas sus peticiones siguientes, también en AUDIT. */
-  async blockIp(e: SecurityEvent): Promise<void> {
-    if (!confirm(this.i18n.t('ev.confirmBlockIp', { ip: e.ip }))) return;
-    try {
-      await this.api.ban({ ip: e.ip, duration: '24h', reason: 'dashboard event' });
-      this.ui.notify('ok', () => this.i18n.t('ev.ipBlocked', { ip: e.ip }));
-      this.ui.bump();
-    } catch (err) {
-      this.ui.notify('error', () => this.api.describe(err as ApiErr));
-    }
+  /** Bloquea la IP del evento hasta que se desbloquee a mano. */
+  blockIp(e: SecurityEvent): Promise<void> {
+    return this.actions.blockIp(e.ip);
   }
 
   /** Bloquea el bot del evento por su nombre (texto del User-Agent), venga de la IP que venga. */

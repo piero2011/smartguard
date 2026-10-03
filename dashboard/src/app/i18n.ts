@@ -111,6 +111,7 @@ const EN: Dict = {
   'dur.7d': '7 days',
   'dur.30d': '30 days',
   'dur.365d': '1 year',
+  'dur.3650d': 'Until I unblock it',
 
   'list.ADMIN_ALLOWLIST': 'Admin IPs',
   'list.SERVICE_ALLOWLIST': 'Services',
@@ -136,6 +137,7 @@ const EN: Dict = {
   'bl.count': 'Times',
   'bl.created': 'Created',
   'bl.expires': 'Expires',
+  'bl.never': 'Until unblocked',
   'bl.mode': 'Mode',
   'bl.action': 'Action',
   'bl.confirmUnblock': 'Unblock {ip}?',
@@ -178,8 +180,8 @@ const EN: Dict = {
   'ov.open': 'Click to see the details',
   'ev.blockIp': 'Block IP',
   'ev.blockBot': 'Block bot',
-  'ev.confirmBlockIp': 'Block {ip} for 24 hours? It applies to every request from that IP, also in AUDIT mode.',
-  'ev.ipBlocked': '{ip} blocked for 24 hours.',
+  'ev.confirmBlockIp': 'Block {ip} until you unblock it? It applies to every request from that IP, also in AUDIT mode.',
+  'ev.ipBlocked': '{ip} blocked until you unblock it (Blocked tab).',
   'ev.promptBot': 'Text to block in the User-Agent (the bot\'s own name). Every request whose User-Agent contains it is blocked, from any IP, also in AUDIT mode.\n\nUser-Agent of this event:\n{ua}',
   'ev.botBlocked': 'Bot "{pattern}" blocked.',
 
@@ -322,6 +324,7 @@ const ES: Dict = {
   'dur.7d': '7 días',
   'dur.30d': '30 días',
   'dur.365d': '1 año',
+  'dur.3650d': 'Hasta que la desbloquee',
 
   'list.ADMIN_ALLOWLIST': 'IPs de administración',
   'list.SERVICE_ALLOWLIST': 'Servicios',
@@ -347,6 +350,7 @@ const ES: Dict = {
   'bl.count': 'Veces',
   'bl.created': 'Creado',
   'bl.expires': 'Caduca',
+  'bl.never': 'Hasta desbloquear',
   'bl.mode': 'Modo',
   'bl.action': 'Acción',
   'bl.confirmUnblock': '¿Desbloquear {ip}?',
@@ -389,8 +393,8 @@ const ES: Dict = {
   'ov.open': 'Clic para ver el detalle',
   'ev.blockIp': 'Bloquear IP',
   'ev.blockBot': 'Bloquear bot',
-  'ev.confirmBlockIp': '¿Bloquear {ip} durante 24 horas? Se aplica a todas las peticiones de esa IP, también en modo AUDIT.',
-  'ev.ipBlocked': '{ip} bloqueada durante 24 horas.',
+  'ev.confirmBlockIp': '¿Bloquear {ip} hasta que la desbloquees? Se aplica a todas las peticiones de esa IP, también en modo AUDIT.',
+  'ev.ipBlocked': '{ip} bloqueada hasta que la desbloquees (pestaña Bloqueadas).',
   'ev.promptBot': 'Texto a bloquear en el User-Agent (el nombre propio del bot). Se bloquea toda petición cuyo User-Agent lo contenga, venga de la IP que venga, también en modo AUDIT.\n\nUser-Agent de este evento:\n{ua}',
   'ev.botBlocked': 'Bot "{pattern}" bloqueado.',
 

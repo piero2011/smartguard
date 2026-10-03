@@ -5,6 +5,7 @@ import { RulesService } from '../rules/rules.service';
 import { BanService } from '../ban/ban.service';
 import { AllowlistService } from '../whitelist/allowlist.service';
 import { ReputationService } from '../reputation/reputation.service';
+import { MAX_BAN_SEC } from '../reputation/reputation.store';
 import { ModeService } from '../scoring/mode.service';
 import { CloudflareRangesService } from '../cloudflare/cloudflare-ranges.service';
 import { ParsedIp, ipKey, parseIp } from '../common/ip.util';
@@ -135,7 +136,7 @@ export class AdminController {
         ban: current,
       });
     }
-    const durationSec = parseDuration(dto.duration, 3600);
+    const durationSec = Math.min(parseDuration(dto.duration, 3600), MAX_BAN_SEC);
     const record = await this.bans.ban({
       ip,
       ipKey: key,

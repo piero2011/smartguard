@@ -1,4 +1,6 @@
-import { Injectable, signal } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
+import { Api, ApiErr, PERMANENT } from './api.service';
+import { I18n } from './i18n';
 
 /** Texto que se genera en cada render: así se re-traduce al cambiar de idioma. */
 export type Text = () => string;
@@ -53,5 +55,29 @@ export class Ui {
   openBans(audit: boolean): void {
     this.showAuditBans.set(audit);
     this.tab.set('blocked');
+  }
+}
+
+/** Acciones de bloqueo compartidas por las tablas (Resumen, Eventos). */
+@Injectable({ providedIn: 'root' })
+export class BlockActions {
+  private readonly api = inject(Api);
+  private readonly ui = inject(Ui);
+  private readonly i18n = inject(I18n);
+
+  /**
+   * Bloquea una IP hasta que se desbloquee a mano (pestaña Bloqueadas). Vale para todas sus
+   * peticiones siguientes, también en AUDIT. Acepta una clave IPv6 con prefijo ("2001:db8::/64").
+   */
+  async blockIp(ipOrKey: string): Promise<void> {
+    const ip = ipOrKey.split('/')[0] ?? ipOrKey;
+    if (!confirm(this.i18n.t('ev.confirmBlockIp', { ip }))) return;
+    try {
+      await this.api.ban({ ip, duration: PERMANENT, reason: 'dashboard' });
+      this.ui.notify('ok', () => this.i18n.t('ev.ipBlocked', { ip }));
+      this.ui.bump();
+    } catch (err) {
+      this.ui.notify('error', () => this.api.describe(err as ApiErr));
+    }
   }
 }

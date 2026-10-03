@@ -130,6 +130,17 @@ export interface ApiErr {
   params: Record<string, unknown>;
 }
 
+/**
+ * Duración de un bloqueo manual "hasta que se desbloquee". La API exige una duración, así que se
+ * envía una muy larga (10 años) y el panel la muestra como permanente.
+ */
+export const PERMANENT = '3650d';
+
+/** ¿La caducidad está tan lejos (más de 5 años) que es un bloqueo "hasta desbloquear"? */
+export function isPermanent(expiresAt: number): boolean {
+  return expiresAt - Date.now() > 5 * 365 * 86_400_000;
+}
+
 const TOKEN_KEY = 'sg_token';
 
 @Injectable({ providedIn: 'root' })

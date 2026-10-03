@@ -10,6 +10,7 @@ import {
   ScoringParams,
   StatsBucket,
   TopIncrements,
+  MAX_BAN_SEC,
   banIndexMember,
 } from './reputation.store';
 
@@ -105,7 +106,9 @@ export class RedisReputationStore implements ReputationStore {
         .set(this.banKey(r.scope, r.key, r.audit), JSON.stringify(r), 'EX', ttl)
         .zadd(idx, r.expiresAt, banIndexMember(r.scope, r.key))
         .zremrangebyscore(idx, '-inf', Date.now())
-        .expire(idx, 30 * DAY_SEC)
+        // El índice debe vivir al menos tanto como el ban más largo posible (MAX_BAN_SEC): con 30 días,
+        // un ban manual "hasta desbloquear" desaparecía de los listados si no entraba ninguno nuevo.
+        .expire(idx, MAX_BAN_SEC + DAY_SEC)
         .exec(),
     );
   }

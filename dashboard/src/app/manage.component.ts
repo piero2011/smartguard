@@ -1,5 +1,5 @@
 import { Component, WritableSignal, inject, signal } from '@angular/core';
-import { AllowMatch, Api, ApiErr, ClientList, LookupResult } from './api.service';
+import { AllowMatch, Api, ApiErr, ClientList, LookupResult, PERMANENT, isPermanent } from './api.service';
 import { I18n, TPipe } from './i18n';
 import { Text, Ui } from './ui';
 
@@ -112,7 +112,7 @@ type Msg = { kind: 'ok' | 'error' | 'warn'; text: Text } | null;
       <div class="row">
         <label>{{ 'mg.block.duration' | t }}
           <select (change)="blockDuration.set($any($event.target).value)">
-            @for (d of durations; track d) { <option [value]="d" [selected]="d === blockDuration()">{{ ('dur.' + d) | t }}</option> }
+            @for (d of blockDurations; track d) { <option [value]="d" [selected]="d === blockDuration()">{{ ('dur.' + d) | t }}</option> }
           </select></label>
         <label class="grow">{{ 'mg.block.reason' | t }}
           <input [value]="blockReason()" (input)="blockReason.set($any($event.target).value)" maxlength="200"></label>
@@ -159,7 +159,9 @@ export class ManageComponent {
   readonly hostMsg = signal<Msg>(null);
 
   readonly blockIp = signal('');
-  readonly blockDuration = signal('24h');
+  /** Por defecto, un bloqueo manual dura hasta que se desbloquea a mano. */
+  readonly blockDurations = [PERMANENT, ...this.durations];
+  readonly blockDuration = signal(PERMANENT);
   readonly blockReason = signal('');
   readonly blockMsg = signal<Msg>(null);
 
@@ -278,7 +280,7 @@ export class ManageComponent {
       this.blockMsg,
       async () => {
         const r = await this.api.ban({ ip, duration: this.blockDuration(), reason: this.blockReason().trim() || 'dashboard' });
-        return () => this.i18n.t('mg.block.done', { ip: r.key, until: this.i18n.date(r.expiresAt) });
+        return () => (isPermanent(r.expiresAt) ? this.i18n.t('ev.ipBlocked', { ip: r.key }) : this.i18n.t('mg.block.done', { ip: r.key, until: this.i18n.date(r.expiresAt) }));
       },
       ip,
     );

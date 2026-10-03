@@ -134,6 +134,12 @@ export interface TopIncrements {
   rules: Map<string, number>;
 }
 
+/**
+ * Duración máxima de un ban (10 años). Es lo que el panel envía para un bloqueo manual
+ * "hasta que se desbloquee"; la API recorta a este valor cualquier duración mayor.
+ */
+export const MAX_BAN_SEC = 3650 * 86_400;
+
 export function banIndexMember(scope: BanScope, key: string): string {
   return `${scope}|${key}`;
 }
