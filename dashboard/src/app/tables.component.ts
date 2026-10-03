@@ -412,6 +412,9 @@ const EVENT_FILTERS: Record<EventFilter, (e: SecurityEvent) => boolean> = {
   denied: (e) => e.source === 'analyzer' && [403, 404, 429, 444].includes(e.status ?? 0),
 };
 
+/** IPv4 completa, o IPv6 (con su prefijo opcional, p. ej. la clave "2001:db8::/64"). */
+const FULL_IP = /^(?:\d{1,3}(?:\.\d{1,3}){3}|(?=[0-9a-f:]*:[0-9a-f:]*:)[0-9a-f:]{3,39}(?:\/\d{1,3})?)$/;
+
 /** Eventos de seguridad recientes */
 @Component({
   selector: 'sg-events',
@@ -426,6 +429,15 @@ const EVENT_FILTERS: Record<EventFilter, (e: SecurityEvent) => boolean> = {
         </select>
         <input type="search" [placeholder]="'ev.search' | t" [value]="ui.eventQuery()" (input)="ui.eventQuery.set($any($event.target).value)">
       </div>
+    </div>
+    <div class="row">
+      <label>{{ 'ev.from' | t }}
+        <input type="datetime-local" [value]="ui.eventFrom()" (change)="ui.eventFrom.set($any($event.target).value)"></label>
+      <label>{{ 'ev.to' | t }}
+        <input type="datetime-local" [value]="ui.eventTo()" (change)="ui.eventTo.set($any($event.target).value)"></label>
+      <button class="small" (click)="today()">{{ 'ev.today' | t }}</button>
+      @if (ui.eventFrom() || ui.eventTo()) { <button class="small" (click)="clearDates()">{{ 'ev.clearDates' | t }}</button> }
+      <span class="muted">{{ (searching() ? 'ev.scopeSearch' : 'ev.scopeRecent') | t: { max: limit } }}</span>
     </div>
     <div class="scroll"><table>
       <tr><th>{{ 'ev.time' | t }}</th><th>{{ 'ev.action' | t }}</th><th>IP</th><th>{{ 'ev.host' | t }}</th>
@@ -456,28 +468,61 @@ export class EventsComponent {
   readonly events = signal<SecurityEvent[]>([]);
   readonly filters: EventFilter[] = ['all', 'log', 'suspicious', 'wouldBlock', 'blocked', 'limited', 'st403', 'st429', 'denied'];
 
+  readonly limit = 1000;
+  private loadSeq = 0;
+
+  /** Si el texto buscado es una IP completa (o una clave /64), la búsqueda la hace el servidor. */
+  readonly ipQuery = computed(() => {
+    const q = this.ui.eventQuery().trim().toLowerCase();
+    return FULL_IP.test(q) ? q : '';
+  });
+  /** Con IP o fechas el servidor busca en todos los eventos guardados, no solo en los últimos. */
+  readonly searching = computed(() => !!(this.ipQuery() || this.ui.eventFrom() || this.ui.eventTo()));
+
   /** Eventos que pasan el filtro elegido y el texto buscado (IP, ruta, motivo, host o User-Agent). */
   readonly shown = computed(() => {
     const match = EVENT_FILTERS[this.ui.eventFilter()];
     const q = this.ui.eventQuery().trim().toLowerCase();
     return this.events().filter(
-      (e) => match(e) && (!q || [e.ip, e.uri, e.reason, e.host, e.category, e.userAgent ?? ''].some((v) => String(v ?? '').toLowerCase().includes(q))),
+      (e) =>
+        match(e) &&
+        (!q || [e.ip, e.ipKey ?? '', e.uri, e.reason, e.host, e.category, e.userAgent ?? ''].some((v) => String(v ?? '').toLowerCase().includes(q))),
     );
   });
 
   constructor() {
     effect(() => {
       this.ui.changed();
+      this.ipQuery();
+      this.ui.eventFrom();
+      this.ui.eventTo();
       void this.load();
     });
   }
 
   async load(): Promise<void> {
+    const seq = ++this.loadSeq;
+    const ms = (v: string) => (v && !Number.isNaN(new Date(v).getTime()) ? new Date(v).getTime() : undefined);
     try {
-      this.events.set(await this.api.events(1000));
+      const events = await this.api.events(this.limit, { from: ms(this.ui.eventFrom()), to: ms(this.ui.eventTo()), ip: this.ipQuery() || undefined });
+      // una respuesta antigua no debe pisar a la de una búsqueda posterior
+      if (seq === this.loadSeq) this.events.set(events);
     } catch (e) {
       this.ui.notify('error', () => this.api.describe(e as ApiErr));
     }
+  }
+
+  /** Desde las 00:00 de hoy (hora del navegador) hasta ahora. */
+  today(): void {
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    this.ui.eventFrom.set(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T00:00`);
+    this.ui.eventTo.set('');
+  }
+
+  clearDates(): void {
+    this.ui.eventFrom.set('');
+    this.ui.eventTo.set('');
   }
 
   /** Bloqueada de verdad (BLOCK / RATE_LIMIT) frente a "se habría bloqueado" en AUDIT (WOULD_BLOCK…). */

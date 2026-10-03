@@ -12,7 +12,7 @@ import { ParsedIp, ipKey, parseIp } from '../common/ip.util';
 import { formatDuration, parseDuration } from '../common/uri.util';
 import { currentMinute } from '../stats/stats.service';
 import { AllowValueParam, Infer, IpParam, ValidBody, ValidQuery } from '../common/validation';
-import { AllowBody, BanBody, BotBody, BotQuery, IpInfoQuery, ListQuery, LookupQuery, ModeBody, NetworkBody, NetworkQuery, StatsQuery, UnbanQuery } from './admin.schemas';
+import { AllowBody, BanBody, BotBody, BotQuery, EventsQuery, IpInfoQuery, ListQuery, LookupQuery, ModeBody, NetworkBody, NetworkQuery, StatsQuery, UnbanQuery } from './admin.schemas';
 import { BlocklistService } from '../blocklist/blocklist.service';
 import { IpInfoService } from '../ipinfo/ipinfo.service';
 import { ApiError } from '../common/api-error';
@@ -312,8 +312,10 @@ export class AdminController {
   }
 
   @Get('events')
-  async events(@ValidQuery(ListQuery) q: Infer<typeof ListQuery>): Promise<unknown> {
-    return this.reputation.call((s) => s.listEvents(q.limit ?? 100));
+  async events(@ValidQuery(EventsQuery) q: Infer<typeof EventsQuery>): Promise<unknown> {
+    const filtered = q.from !== undefined || q.to !== undefined || q.ip !== undefined;
+    const query = { from: q.from === undefined ? undefined : Number(q.from), to: q.to === undefined ? undefined : Number(q.to), ip: q.ip };
+    return this.reputation.call((s) => s.listEvents(q.limit ?? 100, filtered ? query : undefined));
   }
 
   @Get('rules')

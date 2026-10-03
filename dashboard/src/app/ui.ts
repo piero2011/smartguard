@@ -23,6 +23,9 @@ export class Ui {
   readonly eventFilter = signal<EventFilter>('all');
   /** Texto libre de la pestaña Eventos (IP, ruta, regla…) */
   readonly eventQuery = signal('');
+  /** Rango de fechas de la pestaña Eventos (valor de un <input type="datetime-local">; '' = sin límite) */
+  readonly eventFrom = signal('');
+  readonly eventTo = signal('');
   /** Pestaña Bloqueadas: incluir los bloqueos simulados de AUDIT */
   readonly showAuditBans = signal(false);
   readonly notices = signal<Notice[]>([]);

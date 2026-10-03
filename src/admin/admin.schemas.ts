@@ -75,6 +75,15 @@ export const ListQuery = {
   limit: field.optional(field.int({ min: 1, max: 1000 })),
 };
 
+export const EventsQuery = {
+  limit: field.optional(field.int({ min: 1, max: 1000 })),
+  /** rango por la hora del evento, en milisegundos desde epoch */
+  from: field.optional(field.string({ pattern: /^\d{1,14}$/, message: 'must be a timestamp in milliseconds' })),
+  to: field.optional(field.string({ pattern: /^\d{1,14}$/, message: 'must be a timestamp in milliseconds' })),
+  /** IP exacta o clave de reputación (un /64 de IPv6) */
+  ip: field.optional(field.ipOrCidr()),
+};
+
 export const StatsQuery = {
   minutes: field.optional(field.int({ min: 1, max: 1440 })),
 };

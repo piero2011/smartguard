@@ -6,6 +6,7 @@ import {
   ApplyResult,
   BlockedBot,
   BlockedNetwork,
+  EventQuery,
   IpState,
   ReputationStore,
   ScoringParams,
@@ -13,10 +14,22 @@ import {
   TopIncrements,
   MAX_BAN_SEC,
   banIndexMember,
+  eventMatches,
 } from './reputation.store';
 
 const DAY_SEC = 86_400;
 const TOP_KEEP = 500;
+/** Búsqueda de eventos: se recorre el stream por páginas, como mucho EVENT_SCAN_PAGES (100 000 entradas). */
+const EVENT_SCAN_PAGE = 1_000;
+const EVENT_SCAN_PAGES = 100;
+const EVENT_ID_SLACK_MS = 3_600_000;
+
+/** ID inmediatamente anterior a uno del stream ("ms-seq"), para paginar hacia atrás sin repetirlo. */
+export function previousStreamId(id: string): string {
+  const [ms, seq] = id.split('-');
+  if (Number(seq) > 0) return `${ms}-${Number(seq) - 1}`;
+  return `${Number(ms) - 1}-18446744073709551615`;
+}
 
 /**
  * Esquema de claves (todas con prefijo REDIS_PREFIX, por defecto "smartguard:") y TTL obligatorio:
@@ -284,20 +297,36 @@ export class RedisReputationStore implements ReputationStore {
     });
   }
 
-  async listEvents(limit: number): Promise<SecurityEvent[]> {
-    const rows = await this.redis.run((c) => c.xrevrange(this.k('events'), '+', '-', 'COUNT', limit));
+  async listEvents(limit: number, query?: EventQuery): Promise<SecurityEvent[]> {
+    if (!query) return this.readEvents('+', '-', limit).then((r) => r.events);
+    // El ID del stream es la hora de inserción, algo posterior a la del evento (el analizador lee
+    // el log con retraso): se acota el stream con margen y se filtra por la hora real del evento.
+    const start = query.from !== undefined ? String(Math.max(0, query.from - EVENT_ID_SLACK_MS)) : '-';
+    let end = query.to !== undefined ? String(query.to + EVENT_ID_SLACK_MS) : '+';
     const out: SecurityEvent[] = [];
+    for (let page = 0; page < EVENT_SCAN_PAGES && out.length < limit; page++) {
+      const { events, lastId, rows } = await this.readEvents(end, start, EVENT_SCAN_PAGE);
+      for (const e of events) if (out.length < limit && eventMatches(e, query)) out.push(e);
+      if (rows < EVENT_SCAN_PAGE || !lastId) break;
+      end = previousStreamId(lastId);
+    }
+    return out;
+  }
+
+  private async readEvents(end: string, start: string, count: number): Promise<{ events: SecurityEvent[]; lastId: string | null; rows: number }> {
+    const rows = await this.redis.run((c) => c.xrevrange(this.k('events'), end, start, 'COUNT', count));
+    const events: SecurityEvent[] = [];
     for (const [, fields] of rows) {
       const i = fields.indexOf('e');
       if (i >= 0 && fields[i + 1]) {
         try {
-          out.push(JSON.parse(fields[i + 1]!) as SecurityEvent);
+          events.push(JSON.parse(fields[i + 1]!) as SecurityEvent);
         } catch {
           /* ignorar */
         }
       }
     }
-    return out;
+    return { events, lastId: rows.length ? rows[rows.length - 1]![0] : null, rows: rows.length };
   }
 
   async flushStats(minute: number, fields: Record<string, number>, ips: string[], top: TopIncrements): Promise<void> {

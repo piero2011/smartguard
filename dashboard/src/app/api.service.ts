@@ -238,8 +238,13 @@ export class Api {
   bans(audit: boolean): Promise<{ total: number; items: BanRecord[] }> {
     return this.req('GET', `/admin/bans?audit=${audit}&limit=500`);
   }
-  events(limit = 100): Promise<SecurityEvent[]> {
-    return this.req('GET', `/admin/events?limit=${limit}`);
+  /** Con `query` el servidor busca en todos los eventos guardados (rango de fechas en ms y/o IP). */
+  events(limit = 100, query: { from?: number; to?: number; ip?: string } = {}): Promise<SecurityEvent[]> {
+    const p = new URLSearchParams({ limit: String(limit) });
+    if (query.from !== undefined) p.set('from', String(query.from));
+    if (query.to !== undefined) p.set('to', String(query.to));
+    if (query.ip) p.set('ip', query.ip);
+    return this.req('GET', `/admin/events?${p}`);
   }
   allowlist(): Promise<AllowList> {
     return this.req('GET', '/admin/allow');

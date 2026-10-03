@@ -84,6 +84,19 @@ export interface BlockedNetwork {
   fetchedAt: number;
 }
 
+/** Filtro del listado de eventos: rango por la hora del evento (ms) y/o IP (o su clave, p. ej. un /64). */
+export interface EventQuery {
+  from?: number;
+  to?: number;
+  ip?: string;
+}
+
+export function eventMatches(e: SecurityEvent, q: EventQuery): boolean {
+  if (q.from !== undefined && e.timestamp < q.from) return false;
+  if (q.to !== undefined && e.timestamp > q.to) return false;
+  return !q.ip || e.ip === q.ip || e.ipKey === q.ip;
+}
+
 export interface StatsBucket {
   minute: number;
   fields: Record<string, number>;
@@ -128,7 +141,8 @@ export interface ReputationStore {
   deleteBlockedNetwork(asn: number): Promise<boolean>;
 
   pushEvents(events: SecurityEvent[], maxLen: number): Promise<void>;
-  listEvents(limit: number): Promise<SecurityEvent[]>;
+  /** Del más reciente al más antiguo. Con `query` busca en TODO lo almacenado, no solo en lo último. */
+  listEvents(limit: number, query?: EventQuery): Promise<SecurityEvent[]>;
 
   flushStats(minute: number, fields: Record<string, number>, ips: string[], top: TopIncrements): Promise<void>;
   readStats(minutes: number[]): Promise<StatsBucket[]>;

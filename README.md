@@ -367,7 +367,7 @@ sudo smartguard status | ip <IP> | ban <IP> [1h] [motivo] | unban <IP> | allow <
 | GET | `/admin/blocked-bots` (bots bloqueados por nombre) | token |
 | POST | `/admin/blocked-bots` `{pattern, note?, ttl?}` — texto a buscar en el User-Agent | token |
 | DELETE | `/admin/blocked-bots?pattern=` | token |
-| GET | `/admin/stats?minutes=` · `/admin/events?limit=` · `/admin/rules` | token |
+| GET | `/admin/stats?minutes=` · `/admin/events?limit=&from=&to=&ip=` (rango en ms e IP: busca en todos los eventos guardados) · `/admin/rules` | token |
 | POST | `/admin/rules/reload` | token |
 | GET/POST | `/admin/mode` `{audit}` | token |
 | GET | `/dashboard/` | loopback (datos con token) |

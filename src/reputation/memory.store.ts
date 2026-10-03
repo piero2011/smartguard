@@ -5,12 +5,14 @@ import {
   ApplyResult,
   BlockedBot,
   BlockedNetwork,
+  EventQuery,
   IpState,
   ReputationStore,
   ScoringParams,
   StatsBucket,
   TopIncrements,
   banIndexMember,
+  eventMatches,
 } from './reputation.store';
 
 /** Map con TTL y tamaño máximo (expulsa lo más antiguo). Protege contra abuso de memoria. */
@@ -272,8 +274,8 @@ export class MemoryReputationStore implements ReputationStore {
     this.events.unshift(...events.slice().reverse());
     if (this.events.length > maxLen) this.events.length = maxLen;
   }
-  async listEvents(limit: number): Promise<SecurityEvent[]> {
-    return this.events.slice(0, limit);
+  async listEvents(limit: number, query?: EventQuery): Promise<SecurityEvent[]> {
+    return (query ? this.events.filter((e) => eventMatches(e, query)) : this.events).slice(0, limit);
   }
   async flushStats(minute: number, fields: Record<string, number>, _ips: string[], top: TopIncrements): Promise<void> {
     const cur = this.stats.get(String(minute)) ?? {};
