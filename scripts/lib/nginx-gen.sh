@@ -42,7 +42,8 @@ gen_allowlist_conf() {
   echo "    default 0;"
   echo "    127.0.0.0/8 1;"
   echo "    ::1/128 1;"
-  { allowlist_entries; [ -n "$extra" ] && printf '%s\n' "$extra" | expand_allow_values; } | sort -u | while read -r e; do
+  # "if" y no "[ … ] &&": con extra vacío el grupo devolvería 1 y pipefail + set -e abortarían.
+  { allowlist_entries; if [ -n "$extra" ]; then printf '%s\n' "$extra" | expand_allow_values; fi; } | sort -u | while read -r e; do
     [ -z "$e" ] && continue
     if is_cidr_v4 "$e" || is_cidr_v6 "$e"; then echo "    $e 1;"; fi
   done

@@ -154,7 +154,7 @@ expand_allow_values() {
     elif is_domain "$e"; then
       getent ahosts "$e" 2>/dev/null | awk '{print $1}' | sort -u | while read -r ip; do
         if is_cidr_v4 "$ip" || is_cidr_v6 "$ip"; then echo "$ip"; fi
-      done
+      done || true   # un dominio que no resuelve no debe abortar (pipefail)
     else
       warn "Entrada de allowlist inválida ignorada: $e"
     fi
@@ -219,5 +219,5 @@ install_dashboard() {
 node_bin() {
   local n
   n=$(command -v node || true)
-  [ -n "$n" ] && readlink -f "$n"
+  if [ -n "$n" ]; then readlink -f "$n"; fi
 }
