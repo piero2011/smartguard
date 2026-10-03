@@ -1,28 +1,32 @@
 # SmartGuard
 
-Capa de seguridad para **WordPress, WooCommerce y WordPress Multisite** que detiene el tráfico
-malicioso **antes de que consuma PHP-FPM**. Nginx sigue siendo el servidor frontal; SmartGuard
-(NestJS + Redis) es el motor de decisión, scoring, reputación y bans, y solo se consulta para
-tráfico que iba a PHP.
+**English** · [Español](README.es.md)
 
-> Prioridades de diseño, en orden: no romper WooCommerce · no romper Multisite · evitar PHP ·
-> evitar falsos positivos · bajo CPU · bajo Redis · fail-open · IPv4+IPv6 · mantenible · auditable.
+Security layer for **WordPress, WooCommerce and WordPress Multisite** that stops malicious traffic
+**before it consumes PHP-FPM**. Nginx stays as the front server; SmartGuard (NestJS + Redis) is the
+decision, scoring, reputation and ban engine, and it is only asked about traffic that was going to PHP.
 
-- Instalación, AUDIT y ENFORCE paso a paso (FASES 13–15): [docs/02-PROCEDIMIENTOS.md](docs/02-PROCEDIMIENTOS.md)
+> Design priorities, in order: do not break WooCommerce · do not break Multisite · avoid PHP ·
+> avoid false positives · low CPU · low Redis · fail-open · IPv4+IPv6 · maintainable · auditable.
+
+- Install on a server, step by step: [section 4](#4-installation-and-first-steps) and
+  [docs/02-PROCEDIMIENTOS.md](docs/02-PROCEDIMIENTOS.md) (Spanish)
+- Install with Docker / Docker Compose: [docs/docker.md](docs/docker.md)
+- All commands: [section 12](#12-commands)
 
 ---
 
-## 1. Arquitectura
+## 1. Architecture
 
 ```mermaid
 flowchart TD
-    I[Internet] --> CF[Cloudflare<br/>proxy + IP Access Rules opcionales]
-    CF --> NFT[nftables · table inet smartguard<br/>solo IPs TCP directas, nunca Cloudflare]
+    I[Internet] --> CF[Cloudflare<br/>proxy + optional IP Access Rules]
+    CF --> NFT[nftables · table inet smartguard<br/>direct TCP IPs only, never Cloudflare]
     NFT --> NG{Nginx}
-    NG -->|estático: jpg css js woff mp4…| FILE[Archivo<br/>sin SmartGuard, sin PHP]
-    NG -->|ataque obvio: .env .git .sql phpmyadmin<br/>métodos raros · bots malos · payloads| D403[403 / 444<br/>solo Nginx]
-    NG -->|abuso de volumen por endpoint<br/>limit_req / limit_conn| D429[429]
-    NG -->|dinámico que va a PHP| AUTH[auth_request → SmartGuard<br/>127.0.0.1:3100 · 1 EVALSHA Redis]
+    NG -->|static: jpg css js woff mp4…| FILE[File<br/>no SmartGuard, no PHP]
+    NG -->|obvious attack: .env .git .sql phpmyadmin<br/>odd methods · bad bots · payloads| D403[403 / 444<br/>Nginx only]
+    NG -->|volume abuse per endpoint<br/>limit_req / limit_conn| D429[429]
+    NG -->|dynamic, going to PHP| AUTH[auth_request → SmartGuard<br/>127.0.0.1:3100 · 1 Redis EVALSHA]
     AUTH -->|200 ALLOW / OBSERVE / fail-open| FPM[PHP-FPM]
     AUTH -->|403 BLOCK / RATE_LIMIT| B403[403]
     FPM --> WP[WordPress · WooCommerce · Multisite]
@@ -30,647 +34,673 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-    L[Nginx log JSON<br/>solo líneas de seguridad] --> A[SmartGuard Analyzer<br/>tail asíncrono, lotes de 2 s]
+    L[Nginx JSON log<br/>security lines only] --> A[SmartGuard Analyzer<br/>async tail, 2 s batches]
     A --> R[(Redis smartguard:*)]
     AUTH2[auth_request] --> R
     R --> S[scoring + decay]
-    R --> RC[reincidencia]
-    R --> BAN[bans temporales]
-    BAN -. IP TCP directa + evidencia fuerte .-> NFT2[nftables]
-    BAN -. reincidente + score muy alto .-> CFAPI[Cloudflare API opcional]
+    R --> RC[recidivism]
+    R --> BAN[temporary bans]
+    BAN -. direct TCP IP + strong evidence .-> NFT2[nftables]
+    BAN -. repeat offender + very high score .-> CFAPI[optional Cloudflare API]
 ```
 
-**Por qué `auth_request` solo en las `location` con `fastcgi_pass`:** es el único punto por el que
-pasa *todo* lo que llega a PHP-FPM (incluidas las redirecciones internas `try_files … /index.php`),
-y nada estático pasa por ahí. Así ningún `.php` directo se salta SmartGuard y ninguna imagen genera
-una subpetición.
+**Why `auth_request` only in the `location` blocks with `fastcgi_pass`:** it is the single point
+through which *everything* that reaches PHP-FPM passes (including the internal redirects of
+`try_files … /index.php`), and nothing static goes through it. No direct `.php` request can skip
+SmartGuard and no image generates a subrequest.
 
-## 2. Estructura
+## 2. Layout
 
 ```
 smartguard/
 ├── src/
-│   ├── main.ts / app.module.ts     Bootstrap Fastify, validación global, shutdown ordenado
-│   ├── config/                     env tipado + YAML (reglas, sitios, bots)
-│   ├── common/                     tipos, IP/CIDR (IPv4/IPv6), URI, logger JSON, guards
-│   ├── redis/                      conexión + circuit breaker + scripts Lua
-│   ├── reputation/                 almacén Redis y almacén en memoria (misma semántica)
-│   ├── rules/                      motor de reglas + protección anti-ReDoS
-│   ├── scoring/                    decisión, contexto de petición, modo AUDIT/ENFORCE
-│   ├── ban/                        BanService (reincidencia, nftables, Cloudflare)
-│   ├── bots/                       verificación FCrDNS (Googlebot, Bingbot, Applebot)
-│   ├── whitelist/                  allowlists por tipo
-│   ├── firewall/                   nftables sin shell (execFile + validación)
-│   ├── cloudflare/                 rangos Cloudflare + API opcional
-│   ├── logs/                       tail del log JSON + analizador de comportamiento
-│   ├── nginx/                      GET /internal/decision (auth_request)
-│   ├── admin/                      API administrativa autenticada
-│   ├── dashboard/                  sirve el build del dashboard Angular (CSP + nonce)
+│   ├── main.ts / app.module.ts     Fastify bootstrap, global validation, ordered shutdown
+│   ├── config/                     typed env + YAML (rules, sites, bots)
+│   ├── common/                     types, IP/CIDR (IPv4/IPv6), URI, JSON logger, guards
+│   ├── redis/                      connection + circuit breaker + Lua scripts
+│   ├── reputation/                 Redis store and in-memory store (same semantics)
+│   ├── rules/                      rule engine + anti-ReDoS protection
+│   ├── scoring/                    decision, request context, AUDIT/ENFORCE mode
+│   ├── ban/                        BanService (recidivism, nftables, Cloudflare)
+│   ├── bots/                       FCrDNS verification (Googlebot, Bingbot, Applebot)
+│   ├── whitelist/                  allowlists by type
+│   ├── firewall/                   nftables without a shell (execFile + validation)
+│   ├── cloudflare/                 Cloudflare ranges + optional API
+│   ├── logs/                       JSON log tail + behaviour analyzer
+│   ├── nginx/                      GET /internal/decision (auth_request), vhost editing
+│   ├── admin/                      authenticated admin API
+│   ├── dashboard/                  serves the Angular dashboard build (CSP + nonce)
 │   ├── health/ metrics/ stats/ alerts/
 ├── config/          rules.yaml · sites.yaml · bots.yaml
-├── nginx/           conf.d/smartguard.conf (→ sites-enabled/00-smartguard.conf en CloudPanel) · smartguard/*.conf
+├── nginx/           conf.d/smartguard.conf (→ sites-enabled/00-smartguard.conf on CloudPanel) · smartguard/*.conf
 ├── nftables/        smartguard.nft · origin-lock.nft
-├── systemd/         smartguard.service (+ drop-in nftables) · smartguard-nft · timer rangos CF
+├── systemd/         smartguard.service (+ nftables drop-in) · smartguard-nft · Cloudflare ranges timer · reprotect watcher
 ├── scripts/         install · update · uninstall · rollback-nginx · update-cloudflare-ips ·
 │                    origin-lock · test-attacks · loadtest · smartguard-fw-sync · lib/
-├── dashboard/       Dashboard Angular 22 (standalone, signals, sin zone.js), inglés/español
+├── docker/          Nginx image, site template and env example for Docker Compose
+├── Dockerfile · docker-compose.yml
+├── dashboard/       Angular 22 dashboard (standalone, signals, no zone.js), English/Spanish
 ├── bin/smartguard   CLI
 ├── logrotate/       smartguard-nginx
 ├── tests/           unit/ · integration/
 └── docs/
 ```
 
-## 3. Requisitos
+## 3. Requirements
 
-| Componente | Versión | Notas |
+| Component | Version | Notes |
 |---|---|---|
-| Debian | 13 | probado para Debian 13 (Trixie) |
-| Node.js | ≥ 22 | del sistema (`/usr/bin/node`), no nvm en `/home`. El `nodejs` de apt en Debian 13 es 20.x: el instalador usa NodeSource |
-| Nginx | ≥ 1.18 | con `http_auth_request_module` y `http_realip_module`. **Debe existir ya**, con los sitios a proteger |
-| Redis | ≥ 6 | opcional en la práctica: sin Redis funciona en memoria (modo degradado) |
-| nftables | cualquiera | opcional |
+| Debian | 13 | tested on Debian 13 (Trixie) |
+| Node.js | ≥ 22 | system-wide (`/usr/bin/node`), not nvm under `/home`. The `nodejs` package of Debian 13 is 20.x: the installer uses NodeSource |
+| Nginx | ≥ 1.18 | with `http_auth_request_module` and `http_realip_module`. **Must already exist**, with the sites to protect |
+| Redis | ≥ 6 | optional in practice: without Redis it works in memory (degraded mode) |
+| nftables | any | optional |
 
-El instalador comprueba todo esto y **instala lo que falte** (curl, tar, openssl, git, redis-tools,
-Node 22 y Redis) preguntando antes. Nginx es lo único que no instala.
+The installer checks all of this and **installs what is missing** (curl, tar, openssl, git,
+redis-tools, Node 22 and Redis), asking first. Nginx is the only thing it does not install.
+With Docker none of this is needed on the host: see [docs/docker.md](docs/docker.md).
 
-### Dependencias (y por qué cada una)
+### Dependencies (and why each one)
 
-| Paquete | Motivo |
+| Package | Reason |
 |---|---|
-| `@nestjs/core`, `@nestjs/common`, `@nestjs/platform-fastify` | Framework pedido; Fastify por menor overhead que Express en el endpoint de decisión |
-| `reflect-metadata`, `rxjs` | Dependencias obligatorias de Nest |
-| `ioredis` | Cliente Redis mantenido, con `defineCommand` (EVALSHA automático), pipelines, timeouts y backoff |
-| `ipaddr.js` | Parsing IPv4/IPv6/CIDR robusto (lo usa también Express); sin dependencias |
-| `yaml` | Reglas y sitios en YAML legible; sin dependencias |
-| `@prometheus-io/client` | Métricas Prometheus estándar (histogramas correctos). Es el antiguo `prom-client`, ahora mantenido por el proyecto Prometheus; misma API. Exige Node ≥ 22 |
+| `@nestjs/core`, `@nestjs/common`, `@nestjs/platform-fastify` | Requested framework; Fastify for lower overhead than Express on the decision endpoint |
+| `reflect-metadata`, `rxjs` | Mandatory Nest dependencies |
+| `ioredis` | Maintained Redis client, with `defineCommand` (automatic EVALSHA), pipelines, timeouts and backoff |
+| `ipaddr.js` | Robust IPv4/IPv6/CIDR parsing (also used by Express); no dependencies |
+| `yaml` | Rules and sites in readable YAML; no dependencies |
+| `@prometheus-io/client` | Standard Prometheus metrics (correct histograms). It is the former `prom-client`, now maintained by the Prometheus project; same API. Requires Node ≥ 22 |
 
-No se usan: class-validator/class-transformer ni clases DTO (la validación son decoradores propios, ver §10), dotenv (systemd `EnvironmentFile=`), axios (fetch nativo), `@nestjs/config`,
-`@nestjs/schedule`, `@nestjs/throttler`, helmet (la API es local; el dashboard pone sus cabeceras
-de seguridad y CSP con nonce a mano), ORMs ni SQL.
+Not used: class-validator/class-transformer or DTO classes (validation is done with our own
+decorators, see §10), dotenv (systemd `EnvironmentFile=`), axios (native fetch), `@nestjs/config`,
+`@nestjs/schedule`, `@nestjs/throttler`, helmet (the API is local; the dashboard sets its security
+headers and nonce-based CSP by hand), ORMs or SQL.
 
-## 4. Instalación y primeros pasos
+## 4. Installation and first steps
 
-### 4.1 Instalar
+To run it with Docker Compose instead, go to [docs/docker.md](docs/docker.md).
 
-En el servidor, como un usuario con `sudo`:
+### 4.1 Install
+
+On the server, as a user with `sudo`:
 
 ```bash
-sudo apt-get install -y git                       # solo si no tienes git
+sudo apt-get install -y git                       # only if git is missing
 git clone https://github.com/piero2011/smartguard.git /tmp/smartguard-src
 cd /tmp/smartguard-src
-sudo ./scripts/install.sh --dry-run               # enseña lo que haría, sin tocar nada
+sudo ./scripts/install.sh --dry-run               # shows what it would do, changes nothing
 sudo ./scripts/install.sh
 ```
 
-Qué hace el instalador:
+What the installer does:
 
-1. **Dependencias.** Si falta algo del sistema lo instala con `apt`, preguntando antes: `curl`, `tar`,
-   `openssl`, `git`, `redis-tools`, **Node.js 22** (NodeSource) y **Redis**.
-   - Si el servidor ya tiene un Node del sistema anterior al 22, avisa de que subirlo afecta a
-     todas las aplicaciones que usen `/usr/bin/node` y solo lo hace si lo confirmas. Con `--yes` no
-     lo sube: hay que añadir `--upgrade-node`.
-   - Si solo hay un Node de usuario (nvm), añade el del sistema sin tocar el otro.
-   - **Nginx no se instala**: SmartGuard protege sitios que ya sirve Nginx (o CloudPanel).
-2. Copia de seguridad completa de `/etc/nginx`.
-3. Instala la aplicación en `/opt/smartguard`, la configuración en `/etc/smartguard` y los
-   fragmentos de Nginx en `/etc/nginx/smartguard`.
-4. Arranca el servicio en modo **AUDIT**: registra lo que bloquearía, pero no bloquea nada.
+1. **Dependencies.** Anything the system lacks is installed with `apt`, asking first: `curl`, `tar`,
+   `openssl`, `git`, `redis-tools`, **Node.js 22** (NodeSource) and **Redis**.
+   - If the server already has a system Node older than 22, it warns that upgrading it affects every
+     application using `/usr/bin/node` and only does it if you confirm. With `--yes` it does not
+     upgrade: add `--upgrade-node`.
+   - If there is only a per-user Node (nvm), it adds the system one without touching the other.
+   - **Nginx is not installed**: SmartGuard protects sites already served by Nginx (or CloudPanel).
+2. Full backup of `/etc/nginx`.
+3. Installs the application in `/opt/smartguard`, the configuration in `/etc/smartguard` and the
+   Nginx snippets in `/etc/nginx/smartguard`.
+4. Starts the service in **AUDIT** mode: it logs what it would block, but blocks nothing.
 
-Opciones de `install.sh`:
+`install.sh` options:
 
-| Opción | Efecto |
+| Option | Effect |
 |---|---|
-| `--dry-run` | Muestra cada paso sin ejecutarlo |
-| `--yes` | No pregunta (salvo la subida de Node, que exige `--upgrade-node`) |
-| `--no-deps` | No instala dependencias; solo las comprueba |
-| `--upgrade-node` | Autoriza subir a la versión 22 un Node del sistema más antiguo |
-| `--enable-nftables` | Activa además el bloqueo en firewall para conexiones directas |
-| `--skip-realip` | No activa la IP real de Cloudflare (si ya la configuras tú) |
+| `--dry-run` | Shows every step without running it |
+| `--yes` | Does not ask (except the Node upgrade, which requires `--upgrade-node`) |
+| `--no-deps` | Does not install dependencies; only checks them |
+| `--upgrade-node` | Allows upgrading an older system Node to version 22 |
+| `--enable-nftables` | Also enables firewall blocking for direct connections |
+| `--skip-realip` | Does not enable Cloudflare's real IP (if you already configure it yourself) |
 
-El instalador **no modifica ningún vhost**: hasta el paso 4.3, SmartGuard no ve tráfico.
+The installer **does not modify any vhost**: until step 4.3, SmartGuard sees no traffic.
 
-### 4.2 Permitir tu IP
+### 4.2 Allow your own IP
 
-Antes de proteger nada, añade la IP desde la que administras para no bloquearte a ti mismo:
+Before protecting anything, add the IP you administer from so you cannot block yourself:
 
 ```bash
-sudo smartguard allow TU_IP ADMIN_ALLOWLIST "Mi IP"
+sudo smartguard allow YOUR_IP ADMIN_ALLOWLIST "My IP"
 sudo smartguard nginx-sync
 ```
 
-### 4.3 Proteger sitios
+### 4.3 Protect sites
 
 ```bash
-sudo smartguard protect tienda.com --dry-run      # enseña las líneas que añadiría al vhost
-sudo smartguard protect tienda.com otra.com
+sudo smartguard protect shop.com --dry-run        # shows the lines it would add to the vhost
+sudo smartguard protect shop.com other.com
 ```
 
-El nombre es el del archivo del vhost en `/etc/nginx/sites-enabled/` sin `.conf`. El comando inserta
-los `include` de SmartGuard en su sitio, comprueba con `nginx -t` y recarga; si Nginx los rechaza,
-deja el vhost como estaba. También se puede hacer desde el panel (pestaña **IPs y sitios**: se marcan
-los sitios y el panel da el comando).
+The name is the vhost file in `/etc/nginx/sites-enabled/` without `.conf`. The command inserts the
+SmartGuard `include` lines in the right place, checks with `nginx -t` and reloads; if Nginx rejects
+them, the vhost is left as it was. It can also be done from the dashboard (**IPs & sites** tab: tick
+the sites and the dashboard gives you the command).
 
-### 4.4 Abrir el panel
+### 4.4 Open the dashboard
 
 ```bash
-sudo grep '^ADMIN_TOKEN=' /etc/smartguard/smartguard.env | cut -d= -f2-     # el token de acceso
-ssh -L 3100:127.0.0.1:3100 usuario@servidor                                 # desde tu PC
+sudo grep '^ADMIN_TOKEN=' /etc/smartguard/smartguard.env | cut -d= -f2-     # the access token
+ssh -L 3100:127.0.0.1:3100 user@server                                      # from your PC
 ```
 
-y abrir `http://127.0.0.1:3100/dashboard/`. El panel solo escucha en la propia máquina; para usarlo
-con un dominio hay que ponerle delante un vhost de Nginx con HTTPS que haga proxy a ese puerto.
+and open `http://127.0.0.1:3100/dashboard/`. The dashboard only listens on the machine itself; to use
+it with a domain, put an Nginx vhost with HTTPS in front that proxies to that port.
 
-### 4.5 De AUDIT a ENFORCE
+### 4.5 From AUDIT to ENFORCE
 
-Deja pasar 24–72 horas en AUDIT y revisa qué se habría bloqueado:
+Let 24–72 hours pass in AUDIT and review what would have been blocked:
 
 ```bash
 sudo smartguard report
 ```
 
-Si no hay tráfico legítimo entre lo señalado, activa el bloqueo real:
+If there is no legitimate traffic among what was flagged, enable real blocking:
 
 ```bash
-sudo smartguard audit off          # ENFORCE.  Volver atrás: sudo smartguard audit on
+sudo smartguard audit off          # ENFORCE.  To go back: sudo smartguard audit on
 ```
 
-Procedimiento completo y verificaciones: [docs/02-PROCEDIMIENTOS.md](docs/02-PROCEDIMIENTOS.md).
+Full procedure and checks: [docs/02-PROCEDIMIENTOS.md](docs/02-PROCEDIMIENTOS.md) (Spanish).
 
-## 5. Configuración
+## 5. Configuration
 
 ### 5.1 `/etc/smartguard/smartguard.env`
 
-Ver [.env.example](.env.example) (comentado). Lo más importante:
+See [.env.example](.env.example) (commented). The most important settings:
 
-| Variable | Por defecto | Qué hace |
+| Variable | Default | What it does |
 |---|---|---|
-| `AUDIT_MODE` | `true` | Solo registra `WOULD_*`; cambiar en caliente con `smartguard audit off` |
-| `ADMIN_ALLOWLIST` / `SERVICE_ALLOWLIST` / `TRUSTED_NETWORKS` | vacío | IPs/CIDR que nunca se banean (y exentas de límites Nginx tras `nginx-sync`) |
-| `SCORE_OBSERVE/RATE_LIMIT/RESTRICT/BLOCK` | 20/40/60/80 | Niveles de respuesta |
-| `STRONG_EVIDENCE_MIN` | 40 | Evidencia de alta confianza necesaria para banear una IP entera (NAT) |
-| `SCORE_DECAY_PER_MINUTE` | 2 | Decaimiento lineal del score |
-| `BAN_FIRST…BAN_MAX` | 15m/1h/6h/24h/7d | Escalado por reincidencia |
-| `IPV6_PREFIX` | 64 | Agrupación IPv6 para reputación y bans |
-| `REDIS_*` | 127.0.0.1:6379 db 0 | Usa una DB distinta a la del object cache de WordPress |
-| `ENABLE_NFTABLES` / `ENABLE_CLOUDFLARE` | false | Integraciones opcionales |
+| `AUDIT_MODE` | `true` | Only logs `WOULD_*`; change it live with `smartguard audit off` |
+| `ADMIN_ALLOWLIST` / `SERVICE_ALLOWLIST` / `TRUSTED_NETWORKS` | empty | IPs/CIDRs that are never banned (and exempt from the Nginx limits after `nginx-sync`) |
+| `SCORE_OBSERVE/RATE_LIMIT/RESTRICT/BLOCK` | 20/40/60/80 | Response levels |
+| `STRONG_EVIDENCE_MIN` | 40 | High-confidence evidence needed to ban a whole IP (NAT) |
+| `SCORE_DECAY_PER_MINUTE` | 2 | Linear score decay |
+| `BAN_FIRST…BAN_MAX` | 15m/1h/6h/24h/7d | Escalation for repeat offenders |
+| `IPV6_PREFIX` | 64 | IPv6 grouping for reputation and bans |
+| `REDIS_*` | 127.0.0.1:6379 db 0 | Use a different DB from the WordPress object cache |
+| `ENABLE_NFTABLES` / `ENABLE_CLOUDFLARE` | false | Optional integrations |
+| `LOCAL_NETWORKS` | empty | Networks accepted as local besides loopback. Only for Docker; leave empty otherwise |
+| `UPDATE_REPO` / `UPDATE_BRANCH` | this repo / `main` | Where `smartguard update` downloads new versions from |
 
-### 5.1b Allowlist y desbloqueo
+### 5.1b Allowlist and unblocking
 
-| Valor | Ejemplo | Cómo se comprueba | Dónde aplica |
+| Value | Example | How it is checked | Where it applies |
 |---|---|---|---|
-| IP / CIDR | `203.0.113.36`, `2001:db8::/48` | en memoria | SmartGuard + Nginx (límites) + nftables |
-| Dominio exacto (cliente) | `app.customily.com` | se resuelve a sus IPs cada 10 min | SmartGuard + Nginx/nftables (IPs resueltas en `nginx-sync`) |
-| Subdominios (cliente) | `*.customily.com` | FCrDNS (PTR → dominio → A/AAAA = misma IP), solo ante señales sospechosas, cacheado | Solo SmartGuard |
-| Host destino | `apicustomizer.orleansembroidery.com`, `*.dev.orleansembroidery.com` | nombre del host de la petición | SmartGuard no puntúa ese sitio |
+| IP / CIDR | `203.0.113.36`, `2001:db8::/48` | in memory | SmartGuard + Nginx (limits) + nftables |
+| Exact domain (client) | `app.customily.com` | resolved to its IPs every 10 min | SmartGuard + Nginx/nftables (IPs resolved on `nginx-sync`) |
+| Subdomains (client) | `*.customily.com` | FCrDNS (PTR → domain → A/AAAA = same IP), only on suspicious signals, cached | SmartGuard only |
+| Destination host | `api.example.com`, `*.dev.example.com` | host name of the request | SmartGuard does not score that site |
 
 ```bash
-sudo smartguard allow 203.0.113.36                 # tu IP (y la desbloquea si estaba baneada)
+sudo smartguard allow 203.0.113.36                  # your IP (and unblocks it if it was banned)
 sudo smartguard allow app.customily.com SERVICE_ALLOWLIST "Customily"
 sudo smartguard allow '*.customily.com' SERVICE_ALLOWLIST
-sudo smartguard allow-host apicustomizer.orleansembroidery.com "API interna"
+sudo smartguard allow-host api.example.com "Internal API"
 sudo smartguard unallow '*.customily.com'
 sudo smartguard allowlist
-sudo smartguard lookup 203.0.113.36               # ¿en qué lista está? ¿bloqueada?
-sudo smartguard nginx-sync                          # exime también de los límites de Nginx
-sudo smartguard unban 1.2.3.4                       # ban de IP + huellas + nftables + Cloudflare + reset de score
-sudo smartguard unban 1.2.3.4 --keep-score          # solo quita el ban
+sudo smartguard lookup 203.0.113.36                 # which list is it in? blocked?
+sudo smartguard nginx-sync                          # also exempts it from the Nginx limits
+sudo smartguard unban 1.2.3.4                       # IP ban + fingerprints + nftables + Cloudflare + score reset
+sudo smartguard unban 1.2.3.4 --keep-score          # only removes the ban
 ```
 
-Estáticas en el `.env` (`ADMIN_ALLOWLIST`, `SERVICE_ALLOWLIST`, `TRUSTED_NETWORKS`, `ALLOW_HOSTS`), dinámicas
-por CLI/API/dashboard (Redis). Un PTR solo no prueba nada (lo controla el dueño de la IP): por eso
-`*.dominio` exige la resolución directa. Para un vhost que no quieres proteger, lo ideal es no incluir
-los snippets de SmartGuard en él; `allow-host` sirve cuando comparte configuración.
+Static entries live in the `.env` (`ADMIN_ALLOWLIST`, `SERVICE_ALLOWLIST`, `TRUSTED_NETWORKS`,
+`ALLOW_HOSTS`); dynamic ones are added by CLI/API/dashboard (Redis). A PTR alone proves nothing (the
+owner of the IP controls it): that is why `*.domain` requires the forward resolution. For a vhost you
+do not want to protect, the ideal is not to include the SmartGuard snippets in it; `allow-host` is for
+when it shares configuration.
 
-### 5.2 Reglas (`rules.yaml`, `rules.d/*.yaml`, overrides por sitio)
+### 5.2 Rules (`rules.yaml`, `rules.d/*.yaml`, per-site overrides, dashboard)
 
-Reglas declarativas (sin `if` en el código). Ejemplo:
+Declarative rules (no `if` in the code). Example:
 
 ```yaml
 - id: env-scan
-  name: Intento de leer .env
+  name: Attempt to read .env
   target: path            # path | query | uri | ua | method
   pattern: '(?:^|/)\.env(?:\.[\w.-]{1,30})?$'
   score: 25
   severity: high
-  confidence: high        # low: solo huella IP+UA · medium: IP sin banear · high: evidencia fuerte
+  confidence: high        # low: IP+UA fingerprint only · medium: IP, never banned · high: strong evidence
   category: SENSITIVE_FILE
-  action: score           # score | block (corta esta petición) | allow (excepción)
+  action: score           # score | block (stops this request) | allow (exception)
   ttl: 86400
 ```
 
-- Las regex se validan al cargar: sin cuantificadores anidados, sin alternancias dentro de
-  grupos con `+`/`*`, sin backreferences, ≤ 600 caracteres, y se prueban con entradas adversariales.
-  Una regla insegura hace fallar la recarga y **se mantiene la configuración anterior**.
-- Tus reglas propias van en `/etc/smartguard/rules.d/*.yaml` (update.sh no las toca).
-- `smartguard rules reload` recarga sin reiniciar.
+- Regexes are validated on load: no nested quantifiers, no alternations inside groups with `+`/`*`,
+  no backreferences, ≤ 600 characters, and they are tested with adversarial inputs. An unsafe rule
+  makes the reload fail and **the previous configuration stays active**.
+- Your own rules go in `/etc/smartguard/rules.d/*.yaml` (update.sh does not touch them), or are
+  created from the dashboard (**Rules** tab, stored in `/var/lib/smartguard/panel-rules.json`).
+- `smartguard rules reload` reloads without restarting.
 
-### 5.3 Sitios (`sites.yaml`)
+### 5.3 Sites (`sites.yaml`)
 
 ```yaml
 sites:
-  orleansembroidery.com:
-    aliases: [www.orleansembroidery.com, www1.orleansembroidery.com]
+  example.com:
+    aliases: [www.example.com]
     multisite: true
     woocommerce: true
     xmlrpc: false
     rules:
       disabled: [wp-user-enum-author]
       overrides: { env-scan: { score: 30 } }
-      extra: [ ...reglas propias; mismo id = reemplaza la global... ]
+      extra: [ ...your own rules; same id = replaces the global one... ]
 ```
 
-Hosts no configurados → reglas globales y host registrado como `_unknown` (el `Host` del cliente
-nunca se usa como clave interna).
+Hosts that are not configured → global rules, and the site is treated as `_unknown` internally (the
+client's `Host` is never used as an internal key).
 
 ### 5.4 Bots (`bots.yaml`)
 
-- **Verificados por FCrDNS** (Google, Bing, Apple): IP → PTR → dominio oficial → A/AAAA → misma IP.
-  Resultado cacheado en memoria y Redis (24 h positivo / 6 h negativo). **Nunca** DNS síncrono: la
-  primera petición de un bot se trata como "no verificada" (sin privilegios ni castigo) mientras se
-  verifica en segundo plano.
-- **Falsos** (UA de Googlebot sin verificación): `fake-bot:google +15`.
-- **No verificables por DNS** (DuckDuckBot, Meta/WhatsApp, Customily): sin privilegios en SmartGuard;
-  Nginx mantiene su tratamiento actual (whitelist UA / `botzone`). Para servicios con IP fija, usa
+- **Verified by FCrDNS** (Google, Bing, Apple): IP → PTR → official domain → A/AAAA → same IP.
+  The result is cached in memory and Redis (24 h positive / 6 h negative). **Never** synchronous DNS:
+  the first request of a bot is treated as "not verified" (no privileges, no penalty) while it is
+  verified in the background.
+- **Fake** (Googlebot UA without verification): `fake-bot:google +15`.
+- **Not verifiable by DNS** (DuckDuckBot, Meta/WhatsApp, Customily): no privileges in SmartGuard;
+  Nginx keeps its current treatment (UA whitelist / `botzone`). For services with a fixed IP, use
   `SERVICE_ALLOWLIST`.
-- **No deseados** (Ahrefs, Semrush, MJ12, Baidu, Yandex…): Nginx ya los bloquea; SmartGuard suma
-  puntos si llegan por otra vía.
+- **Unwanted** (Ahrefs, Semrush, MJ12, Baidu, Yandex…): Nginx already blocks them; SmartGuard adds
+  points if they arrive some other way.
 
 ## 6. Nginx
 
-| Archivo | Contexto | Rol |
+| File | Context | Role |
 |---|---|---|
-| `conf.d/smartguard.conf` → instalado como `conf.d/smartguard.conf` o, si nginx.conf solo incluye `sites-enabled/*.conf` (CloudPanel), como `sites-enabled/00-smartguard.conf` | http | incluye todo lo de abajo (solo definiciones) |
-| `smartguard/cloudflare-realip.conf` | http | `set_real_ip_from` Cloudflare + `real_ip_header CF-Connecting-IP` (generado) |
-| `smartguard/cloudflare-geo.conf` | http | `$sg_tcp_from_cloudflare` (generado) |
-| `smartguard/maps.conf` | http | clasificación, claves de límites, reglas Nginx nuevas, qué se registra |
-| `smartguard/rate-limits.conf` | http | zonas `sg_dynamic`, `sg_login`, `sg_xmlrpc`, `sg_ajax`, `sg_wcajax`, `sg_rest`, `sg_suspicious`, `sg_conn*` (**editable**) |
-| `smartguard/mode.conf` · `limits-mode.conf` | http · server | AUDIT/ENFORCE y kill switch (generados por el CLI) |
-| `smartguard/allowlist.conf` | http | `$sg_trusted` (generado por `nginx-sync`) |
-| `smartguard/log-format.conf` | http | `log_format smartguard_json` sin datos sensibles |
-| `smartguard/upstream.conf` | http | `smartguard_backend` con keepalive |
-| `smartguard/server.conf` | server | reglas nuevas + `limit_req`/`limit_conn` + log JSON |
-| `smartguard/auth.conf` | server | locations internas de `auth_request` con **fail-open** |
-| `smartguard/auth-php.conf` | location | `auth_request` (en cada `location` con `fastcgi_pass`) |
-| `smartguard/static-log.conf` | location | log de 4xx en estáticos (sustituye `access_log off`) |
-| `smartguard/secret.conf` | server | secreto compartido Nginx→SmartGuard (0600) |
+| `conf.d/smartguard.conf` → installed as `conf.d/smartguard.conf` or, if nginx.conf only includes `sites-enabled/*.conf` (CloudPanel), as `sites-enabled/00-smartguard.conf` | http | includes everything below (definitions only) |
+| `smartguard/cloudflare-realip.conf` | http | Cloudflare `set_real_ip_from` + `real_ip_header CF-Connecting-IP` (generated) |
+| `smartguard/cloudflare-geo.conf` | http | `$sg_tcp_from_cloudflare` (generated) |
+| `smartguard/maps.conf` | http | classification, limit keys, new Nginx rules, what gets logged |
+| `smartguard/rate-limits.conf` | http | zones `sg_dynamic`, `sg_login`, `sg_xmlrpc`, `sg_ajax`, `sg_wcajax`, `sg_rest`, `sg_suspicious`, `sg_conn*` (**editable**) |
+| `smartguard/mode.conf` · `limits-mode.conf` | http · server | AUDIT/ENFORCE and kill switch (generated by the CLI) |
+| `smartguard/allowlist.conf` | http | `$sg_trusted` (generated by `nginx-sync`) |
+| `smartguard/log-format.conf` | http | `log_format smartguard_json` without sensitive data |
+| `smartguard/upstream.conf` | http | `smartguard_backend` with keepalive |
+| `smartguard/server.conf` | server | new rules + `limit_req`/`limit_conn` + JSON log |
+| `smartguard/auth.conf` | server | internal `auth_request` locations with **fail-open** |
+| `smartguard/auth-php.conf` | location | `auth_request` (in every `location` with `fastcgi_pass`) |
+| `smartguard/static-log.conf` | location | logs 4xx on static files (replaces `access_log off`) |
+| `smartguard/secret.conf` | server | Nginx→SmartGuard shared secret (0600) |
 
-Límites (anti-flood, altos a propósito por NAT/HTTP2/móviles):
+Limits (anti-flood, high on purpose because of NAT/HTTP2/mobile):
 
-| Zona | Clave | Rate | Burst |
+| Zone | Key | Rate | Burst |
 |---|---|---|---|
-| `sg_dynamic` | IP, todo lo no estático | 30 r/s | 300 |
+| `sg_dynamic` | IP, everything non-static | 30 r/s | 300 |
 | `sg_login` | IP, `POST wp-login.php` | 10 r/min | 20 |
 | `sg_ajax` | IP, `admin-ajax.php` | 20 r/s | 150 |
 | `sg_wcajax` | IP, `?wc-ajax=` | 20 r/s | 150 |
-| `sg_rest` | IP, `/wp-json/` y `?rest_route=` | 15 r/s | 150 |
+| `sg_rest` | IP, `/wp-json/` and `?rest_route=` | 15 r/s | 150 |
 | `sg_xmlrpc` | IP, `xmlrpc.php` | 2 r/min | 5 |
-| `sg_suspicious` | IP, curl/python-requests/Go/UA vacío | 5 r/s | 50 |
-| `sg_conn` / `sg_conn_dynamic` | IP | 128 / 48 simultáneas | — |
+| `sg_suspicious` | IP, curl/python-requests/Go/empty UA | 5 r/s | 50 |
+| `sg_conn` / `sg_conn_dynamic` | IP | 128 / 48 simultaneous | — |
 
-**Sobre 429 en `auth_request`:** Nginx `auth_request` solo entiende 2xx/401/403. SmartGuard responde
-429 para `RATE_LIMIT` (según la API pedida), pero `auth.conf` lo traduce a **403** al cliente. No se
-usa `error_page 403/429` en la `location` PHP porque tu vhost tiene `fastcgi_intercept_errors on` y
-reemplazaría los 401/403 legítimos de WordPress (REST, nonces). Los 429 reales los producen los
-`limit_req` de Nginx.
+**About 429 in `auth_request`:** Nginx `auth_request` only understands 2xx/401/403. SmartGuard
+answers 429 for `RATE_LIMIT` (per the requested API), but `auth.conf` translates it to **403** for
+the client. `error_page 403/429` is not used in the PHP `location` because a vhost with
+`fastcgi_intercept_errors on` would replace WordPress's legitimate 401/403 (REST, nonces). The real
+429s come from Nginx's `limit_req`.
 
 ## 7. Cloudflare
 
-- **IP real:** `$remote_addr` = visitante **solo** si la IP TCP es de Cloudflare. `CF-Connecting-IP`
-  en una conexión directa se ignora. Verificación: docs/02, 13.6 punto 4.
-- **nftables nunca recibe IPs de `CF-Connecting-IP`**: solo IPs TCP de conexiones directas, y los
-  rangos de Cloudflare están protegidos en su propio set.
-- **Rangos:** `scripts/update-cloudflare-ips.sh` (timer semanal) descarga por HTTPS, valida cada CIDR,
-  aborta si la lista es sospechosa, escribe de forma atómica, `nginx -t` antes de recargar y actualiza
-  nftables en una sola transacción.
-- **Origin lock** (solo Cloudflare + tus IPs en 80/443): `scripts/origin-lock.sh check|enable|disable`.
-  No activar hasta que `check` pase (todos los dominios proxyados, sin servicios que conecten directo).
-- **API opcional:** IP Access Rules (cuenta o zona) solo para reincidentes con score muy alto, con
-  deduplicación, máximo de reglas activas, límite por hora y borrado automático al caducar.
+- **Real IP:** `$remote_addr` = visitor **only** if the TCP IP belongs to Cloudflare.
+  `CF-Connecting-IP` on a direct connection is ignored. Check: docs/02, 13.6 point 4.
+- **nftables never receives IPs from `CF-Connecting-IP`**: only TCP IPs of direct connections, and
+  the Cloudflare ranges are protected in their own set.
+- **Ranges:** `scripts/update-cloudflare-ips.sh` (weekly timer) downloads over HTTPS, validates every
+  CIDR, aborts if the list looks suspicious, writes atomically, runs `nginx -t` before reloading and
+  updates nftables in a single transaction.
+- **Origin lock** (only Cloudflare + your IPs on 80/443): `scripts/origin-lock.sh check|enable|disable`.
+  Do not enable it until `check` passes (every domain proxied, no services connecting directly).
+- **Optional API:** IP Access Rules (account or zone) only for repeat offenders with a very high
+  score, with deduplication, a maximum number of active rules, an hourly limit and automatic removal
+  on expiry.
 
 ## 8. Redis
 
-Todas las claves con prefijo `smartguard:` y **TTL obligatorio** (detalle en
+Every key has the `smartguard:` prefix and a **mandatory TTL** (details in
 [src/reputation/redis.store.ts](src/reputation/redis.store.ts)):
 
-| Clave | Contenido | TTL |
+| Key | Content | TTL |
 |---|---|---|
-| `ip:{ip}` | score, evidencia fuerte, ventana de hits, first/last seen | 1 h (renovable) |
-| `fp:{hash}` | score de la huella IP+UA | 30 min |
-| `reasons:{ip}` | últimos 50 motivos | ≥ 24 h |
-| `ban:{ip}` · `ban:fp:{hash}` · `auditban:*` | ban JSON | duración del ban |
-| `bans` · `auditbans` | índice ZSET (listados sin SCAN/KEYS) | limpiado en cada inserción |
-| `recid:{ip}` | reincidencia | 14 d |
-| `dns:{bot}|{ip}` | resultado FCrDNS | 24 h / 6 h |
-| `stats:{min}` · `hll:ips:{min}` · `top:*:{h}` | estadísticas agregadas | 48 h |
-| `events` | stream de eventos | MAXLEN ~20 000 |
+| `ip:{ip}` | score, strong evidence, hit window, first/last seen | 1 h (renewable) |
+| `fp:{hash}` | score of the IP+UA fingerprint | 30 min |
+| `reasons:{ip}` | last 50 reasons | ≥ 24 h |
+| `ban:{ip}` · `ban:fp:{hash}` · `auditban:*` | ban JSON | ban duration |
+| `bans` · `auditbans` | ZSET index (listings without SCAN/KEYS) | cleaned on every insert |
+| `recid:{ip}` | recidivism | 14 d |
+| `dns:{bot}|{ip}` | FCrDNS result | 24 h / 6 h |
+| `stats:{min}` · `hll:ips:{min}` · `top:*:{h}` | aggregated statistics (also per site) | 48 h |
+| `events` | event stream | MAXLEN ~20 000 |
 
-Coste por decisión: **1 `EVALSHA`** (lectura pura si la petición no tiene señales: el tráfico normal
-no crea claves). Estadísticas agregadas en memoria y volcadas cada 10 s en un pipeline.
-Circuit breaker: 5 errores en 10 s → 30 s usando el almacén en memoria; `enableOfflineQueue=false`
-y timeout de 60 ms por comando; reconexión con backoff exponencial hasta 30 s.
+Cost per decision: **1 `EVALSHA`** (a pure read if the request has no signals: normal traffic creates
+no keys). Statistics are aggregated in memory and flushed every 10 s in a pipeline. Circuit breaker:
+5 errors in 10 s → 30 s using the in-memory store; `enableOfflineQueue=false` and a 60 ms timeout per
+command; reconnection with exponential backoff up to 30 s.
 
-Recomendado: una DB propia (`REDIS_DB`) o una instancia dedicada con `maxmemory 128mb` +
-`maxmemory-policy volatile-lru` (todas las claves de SmartGuard tienen TTL).
+Recommended: its own DB (`REDIS_DB`) or a dedicated instance with `maxmemory 128mb` +
+`maxmemory-policy volatile-lru` (every SmartGuard key has a TTL).
 
-## 9. Scoring y decisiones
+## 9. Scoring and decisions
 
-| Score | Acción |
+| Score | Action |
 |---|---|
 | 0–19 | ALLOW |
-| 20–39 | OBSERVE (permitido, registrado) |
-| 40–59 | RATE_LIMIT (60 peticiones dinámicas/min) |
+| 20–39 | OBSERVE (allowed, logged) |
+| 40–59 | RATE_LIMIT (60 dynamic requests/min) |
 | 60–79 | RESTRICTION (15/min) |
-| ≥ 80 **y** evidencia fuerte ≥ 40 | BLOCK + ban de IP (15m → 1h → 6h → 24h → 7d) |
-| ≥ 80 solo en la huella | BLOCK de IP+UA 10 min (el resto del NAT no se ve afectado) |
+| ≥ 80 **and** strong evidence ≥ 40 | BLOCK + IP ban (15m → 1h → 6h → 24h → 7d) |
+| ≥ 80 on the fingerprint only | BLOCK of IP+UA for 10 min (the rest of the NAT is unaffected) |
 
-Protección NAT (punto 11): el volumen **nunca** suma puntos en SmartGuard; las señales de baja
-confianza solo afectan a la huella IP+User-Agent; las de confianza media pueden limitar pero
-**nunca** banear una IP entera; el bonus de escaneo rápido solo cuenta hits de confianza media/alta.
+NAT protection: volume **never** adds points in SmartGuard; low-confidence signals only affect the
+IP+User-Agent fingerprint; medium-confidence ones can limit but **never** ban a whole IP; the fast
+scanning bonus only counts medium/high-confidence hits.
 
-Cada decisión es explicable: `smartguard ip <IP>` o `GET /admin/ip/<IP>` muestra motivos, decay y
-acción (ejemplo en docs/02, 14.1).
+Every decision is explainable: `smartguard ip <IP>` or `GET /admin/ip/<IP>` shows reasons, decay and
+action (example in docs/02, 14.1).
 
-## 10. Seguridad del propio SmartGuard
+## 10. Security of SmartGuard itself
 
-- Escucha solo en `127.0.0.1` (arranca con error si `BIND_ADDRESS` no es loopback).
-- Todas las rutas rechazan peticiones que no vienen de loopback.
-- `/internal/decision` exige el secreto compartido de Nginx (evita que un PHP/SSRF local envenene
-  la reputación de IPs). Nginx no reenvía cookies, Authorization ni cuerpo.
-- API admin: `Authorization: Bearer ADMIN_TOKEN` (≥ 32 caracteres, comparación en tiempo constante),
-  rate limit, body ≤ 16 KB.
-- Validación con **decoradores de parámetro** (sin DTOs ni class-validator): `@ValidBody(esquema)`,
-  `@ValidQuery(esquema)`, `@IpParam('ip')`, `@AllowValueParam('value')` en
-  [src/common/validation.ts](src/common/validation.ts). Los esquemas son objetos planos
-  ([src/admin/admin.schemas.ts](src/admin/admin.schemas.ts)); campos no declarados → 400.
-- systemd: usuario `smartguard`, sin capacidades (solo `CAP_NET_ADMIN` con el drop-in de nftables),
-  `ProtectSystem=strict`, `ProtectHome`, `NoNewPrivileges`, filtro de syscalls, `MemoryMax`.
-- nftables sin shell: `execFile("/usr/sbin/nft", argv)` con IP canónica validada por lista blanca.
-- Logs sin cookies/tokens/Authorization; queries redactadas; el log de Nginx no guarda query strings.
+- Listens only on `127.0.0.1` (it fails to start if `BIND_ADDRESS` is not loopback).
+- Every route rejects requests that do not come from loopback. In a Docker deployment the internal
+  container network is declared in `LOCAL_NETWORKS` and accepted too; it must never be a public network.
+- `/internal/decision` requires the secret shared with Nginx (prevents a local PHP/SSRF from poisoning
+  IP reputation). Nginx forwards no cookies, Authorization or body.
+- Admin API: `Authorization: Bearer ADMIN_TOKEN` (≥ 32 characters, constant-time comparison), rate
+  limit, body ≤ 16 KB.
+- Validation with **parameter decorators** (no DTOs or class-validator): `@ValidBody(schema)`,
+  `@ValidQuery(schema)`, `@IpParam('ip')`, `@AllowValueParam('value')` in
+  [src/common/validation.ts](src/common/validation.ts). Schemas are plain objects
+  ([src/admin/admin.schemas.ts](src/admin/admin.schemas.ts)); undeclared fields → 400.
+- systemd: `smartguard` user, no capabilities (only `CAP_NET_ADMIN` with the nftables drop-in),
+  `ProtectSystem=strict`, `ProtectHome`, `NoNewPrivileges`, syscall filter, `MemoryMax`.
+- nftables without a shell: `execFile("/usr/sbin/nft", argv)` with a canonical IP validated by allowlist.
+- Logs without cookies/tokens/Authorization; redacted queries; the Nginx log stores no query strings.
 
 ## 11. Fail-open
 
-| Fallo | Resultado |
+| Failure | Result |
 |---|---|
-| SmartGuard parado / no escucha | `auth_request` → 502 → `@smartguard_failopen` (204) → PHP normal |
-| SmartGuard lento (> 300 ms) | 504 → fail-open |
-| Error interno en la decisión | SmartGuard responde 200 `ERROR_FAIL_OPEN` |
-| Redis caído | Decisiones con almacén en memoria local (reglas y bans locales siguen) |
-| Emergencia | `smartguard killswitch on` (Nginx deja de consultar) |
+| SmartGuard stopped / not listening | `auth_request` → 502 → `@smartguard_failopen` (204) → normal PHP |
+| SmartGuard slow (> 300 ms) | 504 → fail-open |
+| Internal error in the decision | SmartGuard answers 200 `ERROR_FAIL_OPEN` |
+| Redis down | Decisions with the local in-memory store (rules and local bans keep working) |
+| Emergency | `smartguard killswitch on` (Nginx stops asking) |
 
-Las reglas puramente Nginx (bots, rutas prohibidas, límites) siguen activas en todos los casos.
+The pure Nginx rules (bots, forbidden paths, limits) stay active in every case.
 
-## 12. Comandos
+## 12. Commands
 
-Todos se ejecutan en el servidor con `sudo`. `sudo smartguard help` muestra esta lista.
+All of them run on the server with `sudo`. `sudo smartguard help` shows this list.
 
-**Estado y diagnóstico**
+**Status and diagnosis**
 
-| Comando | Qué hace |
+| Command | What it does |
 |---|---|
-| `smartguard status` | Servicio, versión, modo, Redis, bloqueos y tráfico de la última hora |
-| `smartguard version` | Versión y commit instalados |
-| `smartguard ip <IP>` | Explica la puntuación y el estado de una IP: por qué fue bloqueada |
-| `smartguard lookup <valor>` | Dónde está una IP, CIDR, dominio o URL: en qué lista, si está bloqueada |
-| `smartguard events [N]` | Últimos N eventos de seguridad (30 por defecto) |
-| `smartguard bans [--audit]` | Bloqueos activos (o los que se habrían aplicado en AUDIT) |
-| `smartguard report` | Informe de AUDIT: qué se habría bloqueado y posibles falsos positivos |
-| `smartguard logs` | Registro del servicio en vivo |
+| `smartguard status` | Service, version, mode, Redis, blocks and traffic of the last hour |
+| `smartguard version` | Installed version and commit |
+| `smartguard ip <IP>` | Explains the score and state of an IP: why it was blocked |
+| `smartguard lookup <value>` | Where an IP, CIDR, domain or URL is: which list, whether it is blocked |
+| `smartguard events [N]` | Last N security events (30 by default) |
+| `smartguard bans [--audit]` | Active blocks (or the ones AUDIT would have applied) |
+| `smartguard report` | AUDIT report: what would have been blocked and possible false positives |
+| `smartguard logs` | Live service log |
 
-**Bloquear y permitir**
+**Block and allow**
 
-| Comando | Qué hace |
+| Command | What it does |
 |---|---|
-| `smartguard ban <IP> [duración] [motivo]` | Bloqueo manual (`15m`, `1h`, `2d`…; por defecto 1 h) |
-| `smartguard unban <IP> [--keep-score]` | Quita el bloqueo y, por defecto, reinicia su puntuación |
-| `smartguard allow <valor> [tipo] [nota]` | Lista blanca de clientes: IP, CIDR, dominio o `*.dominio`. Tipo: `ADMIN_ALLOWLIST` (por defecto), `SERVICE_ALLOWLIST`, `TRUSTED_NETWORK` |
-| `smartguard allow-host <dominio> [nota]` | Exime un sitio o subdominio destino (SmartGuard no puntúa sus peticiones) |
-| `smartguard unallow <valor>` | Quita una entrada de la lista blanca |
-| `smartguard allowlist` | Muestra la lista blanca completa |
-| `smartguard nginx-sync` | Lleva la lista blanca a Nginx (exime de los límites) y regenera el secreto |
+| `smartguard ban <IP> [duration] [reason]` | Manual block (`15m`, `1h`, `2d`…; 1 h by default) |
+| `smartguard unban <IP> [--keep-score]` | Removes the block and, by default, resets its score |
+| `smartguard allow <value> [type] [note]` | Client allowlist: IP, CIDR, domain or `*.domain`. Type: `ADMIN_ALLOWLIST` (default), `SERVICE_ALLOWLIST`, `TRUSTED_NETWORK` |
+| `smartguard allow-host <domain> [note]` | Exempts a destination site or subdomain (SmartGuard does not score its requests) |
+| `smartguard unallow <value>` | Removes an allowlist entry |
+| `smartguard allowlist` | Shows the full allowlist |
+| `smartguard nginx-sync` | Pushes the allowlist to Nginx (exempt from limits) and regenerates the secret |
 
-**Sitios**
+**Sites**
 
-| Comando | Qué hace |
+| Command | What it does |
 |---|---|
-| `smartguard protect <sitio>… [--dry-run] [--yes]` | Añade la protección a esos sitios editando su vhost |
-| `smartguard unprotect <sitio>… [--dry-run] [--yes]` | La quita |
-| `smartguard protected` | Sitios registrados con `protect` |
-| `smartguard reprotect` | Repone la protección en los registrados que la hayan perdido (lo lanza systemd solo cuando CloudPanel reescribe un vhost) |
+| `smartguard protect <site>… [--dry-run] [--yes]` | Adds the protection to those sites by editing their vhost |
+| `smartguard unprotect <site>… [--dry-run] [--yes]` | Removes it |
+| `smartguard protected` | Sites registered with `protect` |
+| `smartguard reprotect` | Restores the protection on registered sites that lost it (systemd runs it by itself when CloudPanel rewrites a vhost) |
 
-**Modo y emergencias**
+**Mode and emergencies**
 
-| Comando | Qué hace |
+| Command | What it does |
 |---|---|
-| `smartguard audit status` | Modo actual |
-| `smartguard audit on` | AUDIT: solo registra |
-| `smartguard audit off` | ENFORCE: bloquea |
-| `smartguard killswitch on\|off` | Emergencia: Nginx deja de consultar a SmartGuard (los sitios siguen funcionando) |
-| `smartguard rules reload` | Recarga reglas, sitios y bots sin reiniciar |
-| `smartguard nginx-enable` | Reactiva SmartGuard en Nginx tras `rollback-nginx.sh --disable` |
-| `smartguard fw-sync` | Sincroniza los conjuntos de nftables |
+| `smartguard audit status` | Current mode |
+| `smartguard audit on` | AUDIT: only logs |
+| `smartguard audit off` | ENFORCE: blocks |
+| `smartguard killswitch on\|off` | Emergency: Nginx stops asking SmartGuard (the sites keep working) |
+| `smartguard rules reload` | Reloads rules, sites and bots without restarting |
+| `smartguard nginx-enable` | Re-enables SmartGuard in Nginx after `rollback-nginx.sh --disable` |
+| `smartguard fw-sync` | Synchronizes the nftables sets |
 
-**Mantenimiento**
+**Maintenance**
 
-| Comando | Qué hace |
+| Command | What it does |
 |---|---|
-| `smartguard update [--check] [--force] [--yes]` | Si hay cambios en GitHub, los descarga e instala conservando la configuración |
-| `smartguard backup [archivo.tar.gz]` | Copia completa: configuración, fragmentos de Nginx, listas de Redis, vhosts protegidos y todo `/etc/nginx` |
-| `smartguard restore <archivo> [--keep-env] [--yes]` | Restaura una copia en este servidor |
+| `smartguard update [--check] [--force] [--yes]` | If there are changes on GitHub, downloads and installs them keeping the configuration |
+| `smartguard backup [file.tar.gz]` | Full backup: configuration, Nginx snippets, Redis lists, protected vhosts and all of `/etc/nginx` |
+| `smartguard restore <file> [--keep-env] [--yes]` | Restores a backup on this server |
 
-Los detalles de `update`, `backup`, `restore` y `protect` están en la sección 16.
+The details of `update`, `backup`, `restore` and `protect` are in section 16. With Docker these
+commands do not apply: see [docs/docker.md](docs/docker.md).
 
-## 13. API local
+## 13. Local API
 
-| Método | Ruta | Auth |
+| Method | Path | Auth |
 |---|---|---|
-| GET | `/internal/decision` | secreto Nginx |
+| GET | `/internal/decision` | Nginx secret |
 | GET | `/health` · `/ready` · `/metrics` | loopback |
 | GET | `/admin/bans?audit=&offset=&limit=` | token |
 | GET | `/admin/ip/:ip` | token |
 | POST | `/admin/ban` `{ip, duration?, reason?, firewall?, cloudflare?}` | token |
-| DELETE | `/admin/ban/:ip` (`?reset=false` conserva el score) | token |
-| GET | `/admin/lookup?value=` IP/CIDR/dominio/*.dominio/URL → listas donde está, ban, would-ban, score | token |
-| GET | `/admin/allow` (estática, dinámica, dominios resueltos) | token |
+| DELETE | `/admin/ban/:ip` (`?reset=false` keeps the score) | token |
+| GET | `/admin/lookup?value=` IP/CIDR/domain/*.domain/URL → lists it is in, ban, would-ban, score | token |
+| GET | `/admin/allow` (static, dynamic, resolved domains) | token |
 | POST | `/admin/allow` `{value, type?, target?: client|host, note?, ttl?, unban?}` | token |
 | DELETE | `/admin/allow/:value` | token |
-| GET | `/admin/ipinfo?ips=a,b,c` (hasta 50) → red/ASN, organización, país de registro, ¿hosting? | token |
-| GET | `/admin/blocked-networks` (redes completas bloqueadas) | token |
-| POST | `/admin/blocked-networks` `{ip? | asn?, note?}` — bloquea todos los rangos del ASN | token |
+| GET | `/admin/ipinfo?ips=a,b,c` (up to 50) → network/ASN, organization, registration country, hosting? | token |
+| GET | `/admin/blocked-networks` (whole networks blocked) | token |
+| POST | `/admin/blocked-networks` `{ip? | asn?, note?}` — blocks every range of the ASN | token |
 | DELETE | `/admin/blocked-networks?asn=` | token |
-| GET | `/admin/blocked-bots` (bots bloqueados por nombre) | token |
-| POST | `/admin/blocked-bots` `{pattern, note?, ttl?}` — texto a buscar en el User-Agent | token |
+| GET | `/admin/blocked-bots` (bots blocked by name) | token |
+| POST | `/admin/blocked-bots` `{pattern, note?, ttl?}` — text to look for in the User-Agent | token |
 | DELETE | `/admin/blocked-bots?pattern=` | token |
-| GET | `/admin/stats?minutes=` · `/admin/events?limit=&from=&to=&ip=` (rango en ms e IP: busca en todos los eventos guardados) · `/admin/events/page?limit=&cursor=&kind=&q=&from=&to=` (paginado por cursor; lo usa el panel) · `/admin/system` (versión, disco, memoria y Redis que ocupa SmartGuard) · `/admin/recent?host=&limit=` (tráfico reciente e IPs activas, en memoria) · `/admin/sites` (sitios de Nginx y cuáles están protegidos) · `/admin/panel-rules` (GET/POST/DELETE: reglas creadas desde el panel, guardadas en `/var/lib/smartguard/panel-rules.json`) · `/admin/rules` | token |
+| GET | `/admin/stats?minutes=&host=` (counters, series and tops; all sites or one) | token |
+| GET | `/admin/events?limit=&from=&to=&ip=` (range in ms and IP: searches every stored event) | token |
+| GET | `/admin/events/page?limit=&cursor=&kind=&host=&q=&from=&to=` (cursor pagination; used by the dashboard) | token |
+| GET | `/admin/recent?host=&limit=` (recent traffic and active IPs, in memory) | token |
+| GET | `/admin/sites` (Nginx sites and which ones are protected) | token |
+| GET | `/admin/system` (version, disk, memory and Redis used by SmartGuard) | token |
+| GET | `/admin/rules` (active rules) | token |
+| GET/POST/DELETE | `/admin/panel-rules` (rules created from the dashboard, stored in `/var/lib/smartguard/panel-rules.json`) | token |
 | POST | `/admin/rules/reload` | token |
 | GET/POST | `/admin/mode` `{audit}` | token |
-| GET | `/dashboard/` | loopback (datos con token) |
+| GET | `/dashboard/` | loopback (data with token) |
 
-**Errores con código** (el dashboard los traduce): `{ statusCode, code, message, params }`.
+**Errors with a code** (the dashboard translates them): `{ statusCode, code, message, params }`.
 
-| code | Cuándo | params |
+| code | When | params |
 |---|---|---|
-| `ALREADY_ALLOWLISTED` (409) | el valor ya está en la lista blanca | `matches[]`: lista, valor, origen (.env / dashboard / integrada) |
-| `ALREADY_COVERED` (409) | ya lo cubre un rango o `*.dominio` existente | `matches[]` |
-| `IP_ALLOWLISTED` (409) | se intenta bloquear una IP de la lista blanca | `matches[]` |
-| `ALREADY_BANNED` (409) | la IP ya está bloqueada | `ban` (hasta cuándo, motivo) |
-| `CLOUDFLARE_IP` (400) | se intenta bloquear una IP de Cloudflare | `ip` |
-| `STATIC_ENTRY` (409) | se intenta quitar una entrada del .env desde la API | `lists` |
+| `ALREADY_ALLOWLISTED` (409) | the value is already in the allowlist | `matches[]`: list, value, origin (.env / dashboard / built-in) |
+| `ALREADY_COVERED` (409) | an existing range or `*.domain` already covers it | `matches[]` |
+| `IP_ALLOWLISTED` (409) | trying to block an allowlisted IP | `matches[]` |
+| `ALREADY_BANNED` (409) | the IP is already blocked | `ban` (until when, reason) |
+| `CLOUDFLARE_IP` (400) | trying to block a Cloudflare IP | `ip` |
+| `STATIC_ENTRY` (409) | trying to remove a .env entry through the API | `lists` |
+| `RULE_REJECTED` · `RULE_TOO_BROAD` (400) · `RULE_ID_TAKEN` (409) | a dashboard rule is unsafe, also matches normal traffic, or reuses a built-in id | `error`, `sample`, `id` |
 | `NOT_IN_ALLOWLIST` (404) · `INVALID_IP` · `INVALID_VALUE` · `HOST_REQUIRES_DOMAIN` · `VALIDATION` (400) | — | `field`, `reason` |
 
 ## 13b. Dashboard (Angular, English / Español)
 
-- **Angular 22** standalone + signals, sin zone.js ni librerías de UI (≈56 KB comprimido).
-- **Idioma por defecto: inglés**; selector English/Español en la cabecera (se recuerda en el navegador).
-  Todos los mensajes, incluidos los errores del backend, se traducen por su `code`.
-- Pestañas: **Overview · Traffic · IPs & sites · Rules · Blocked · Allowlist · Events · Backup**
-  (en español: Resumen · Tráfico · IPs y sitios · Reglas · Bloqueadas · Lista blanca · Eventos · Copia).
-  - **Resumen**: gráfico de peticiones permitidas, bloqueadas por SmartGuard y detenidas por reglas de
-    Nginx (1 h, 6 h o 24 h), contadores, los "top" de IPs, rutas y reglas, y lo que ocupa SmartGuard
-    en el servidor (versión, memoria, disco, Redis).
-  - **Tráfico**: IPs activas en los últimos 5 minutos y últimas peticiones evaluadas, también las
-    permitidas. Se guarda solo en memoria (300 por sitio).
-  - **IPs y sitios**: consultar, permitir y bloquear; lista de sitios de Nginx con su estado de
-    protección, buscador, y casillas para obtener el comando `smartguard protect`.
-  - **Reglas**: crear, editar, desactivar y borrar reglas propias (se guardan en
-    `/var/lib/smartguard/panel-rules.json` y se aplican al momento); las incluidas, en solo lectura.
-    Una regla que alcanzaría tráfico normal, con una regex insegura o con el id de una incluida se rechaza.
-  - **Bloqueadas** y **Lista blanca**: lo bloqueado (IPs, redes, bots) y lo permitido.
-  - **Eventos**: peticiones sospechosas o bloqueadas, con filtros por tipo, texto y fechas; 50 por página.
-  - **Copia**: exportar a un archivo e importar lo que se gestiona desde el panel (reglas, lista blanca,
-    bloqueos manuales, bots y redes). La copia completa del servidor es `smartguard backup`.
-- Un selector **Sitio**, con buscador, limita Resumen, Tráfico y Eventos a un sitio protegido (con todos
-  sus dominios) o los muestra todos. La pestaña, el sitio y el periodo se guardan en la URL: recargar
-  la página deja al usuario donde estaba.
-- Tema claro u oscuro según el sistema operativo, con un botón para fijar uno.
-- En **IPs & sites**:
-  - *Check*: escribes una IP, CIDR, dominio, `*.dominio` o URL y te dice al momento si **ya está en
-    una lista y en cuál** (Admin IPs / Services / Trusted networks / Exempt sites, origen .env o
-    dashboard, y por qué coincide: exacta, dentro de un rango, IP de un dominio…), si está bloqueada
-    y hasta cuándo, y su score.
-  - *Allow a client*: IP / CIDR / dominio / `*.dominio` en la lista elegida (permitir una IP la desbloquea).
-  - *Allow a site or subdomain*: dominio, `*.dominio` o URL (`https://api.ejemplo.com/ruta` → `api.ejemplo.com`).
-  - *Block an IP* (15 min … 1 año) y *Unblock an IP* (con opción de conservar el score).
-  - Si el valor ya estaba, se muestra el aviso con la lista (el backend lo valida también: 409).
-- En **Events**, cada fila tiene *Block IP* (24 h) y *Block bot* (por nombre: propone el nombre propio
-  del bot a partir del User-Agent). La lista de bots bloqueados se gestiona en **Blocked**.
-- *Block network* (en Events y Overview) bloquea **la red entera** de esa IP: todos los rangos que anuncia
-  su ASN (p. ej. los ~900 de DigitalOcean), descargados de RIPEstat y refrescados cada día. La pertenencia
-  se comprueba en memoria por búsqueda binaria, sin I/O en la decisión. Cloudflare no se puede bloquear.
-  Pensado para proveedores de hosting; en una operadora de internet bloquearía a clientes reales.
-- Los bloqueos manuales de IP, bot y red **no caducan**: duran hasta que se desbloquean en **Blocked**.
-- **Los bloqueos manuales (IP, bot o red) se aplican siempre, también en AUDIT**: AUDIT solo deja en
-  suspenso lo que SmartGuard decide por su cuenta. Nunca bloquean IPs de la lista blanca ni buscadores
-  verificados, y se rechazan los textos que también cubren navegadores reales (`chrome`, `mozilla`…).
-  Actúan sobre lo que va a PHP (auth_request); los archivos estáticos no pasan por SmartGuard.
-- Bajo cada IP se muestra **a quién pertenece**: país y organización de la red (p. ej. `US · DigitalOcean, LLC`)
-  y la etiqueta *data center* si es un proveedor de hosting (servidores, no personas). Fuente: IP→ASN de
-  Team Cymru por DNS, con caché de 24 h; solo se consulta al abrir una tabla, nunca al decidir. El país
-  es el de **registro de la red**, no geolocalización exacta. La columna *Country* usa `CF-IPCountry` cuando
-  llega (Cloudflare → Network → IP Geolocation) y, si no, ese país de registro.
-- Seguridad: solo loopback, token en `sessionStorage`, CSP `script-src 'self'` y estilos con nonce
-  por petición, sin inline scripts.
+- **Angular 22** standalone + signals, no zone.js or UI libraries.
+- **Default language: English**; English/Español selector in the header (remembered in the browser).
+  Every message, including backend errors, is translated by its `code`.
+- Tabs: **Overview · Traffic · IPs & sites · Rules · Blocked · Allowlist · Events · Backup**.
+  - **Overview**: chart of requests allowed, blocked by SmartGuard and stopped by Nginx rules (1 h,
+    6 h or 24 h), counters, the "top" IPs, paths and rules, and what SmartGuard uses on the server
+    (version, memory, disk, Redis).
+  - **Traffic**: IPs active in the last 5 minutes and the latest evaluated requests, allowed ones
+    included. Kept in memory only (300 per site).
+  - **IPs & sites**: check, allow and block; list of Nginx sites with their protection status, a
+    search box, and checkboxes to get the `smartguard protect` command.
+  - **Rules**: create, edit, disable and delete your own rules (stored in
+    `/var/lib/smartguard/panel-rules.json`, applied at once); the built-in ones are read-only. A rule
+    that would also match normal traffic, has an unsafe regex or reuses a built-in id is rejected.
+  - **Blocked** and **Allowlist**: what is blocked (IPs, networks, bots) and what is allowed.
+  - **Events**: suspicious or blocked requests, with filters by type, text and dates; 50 per page.
+  - **Backup**: export to a file and import what the dashboard manages (rules, allowlist, manual
+    blocks, bots and networks). The full server backup is `smartguard backup`.
+- A **Site** selector, with search, limits Overview, Traffic and Events to one protected site (with
+  all its domains) or shows them all. The tab, the site and the time range are kept in the URL:
+  reloading the page leaves you where you were.
+- Light or dark theme following the operating system, with a button to pin one.
+- In **IPs & sites**:
+  - *Check*: type an IP, CIDR, domain, `*.domain` or URL and it tells you at once whether **it is
+    already in a list and which one** (Admin IPs / Services / Trusted networks / Exempt sites, origin
+    .env or dashboard, and why it matches: exact, inside a range, IP of a domain…), whether it is
+    blocked and until when, and its score.
+  - *Allow a client*: IP / CIDR / domain / `*.domain` in the chosen list (allowing an IP unblocks it).
+  - *Allow a site or subdomain*: domain, `*.domain` or URL (`https://api.example.com/path` → `api.example.com`).
+  - *Block an IP* (15 min … 1 year) and *Unblock an IP* (optionally keeping the score).
+  - If the value was already there, the notice shows the list (the backend validates it too: 409).
+- In **Events** and **Traffic**, every row has *Block IP* and *Block bot* (by name: it suggests the
+  bot's own name from the User-Agent). The list of blocked bots is managed in **Blocked**.
+- *Block network* blocks **the whole network** of that IP: every range announced by its ASN (e.g. the
+  ~900 of DigitalOcean), downloaded from RIPEstat and refreshed daily. Membership is checked in memory
+  by binary search, with no I/O in the decision. Cloudflare cannot be blocked. Meant for hosting
+  providers; on an internet carrier it would block real customers.
+- Manual IP, bot and network blocks **do not expire**: they last until unblocked in **Blocked**.
+- **Manual blocks (IP, bot or network) always apply, also in AUDIT**: AUDIT only suspends what
+  SmartGuard decides by itself. They never block allowlisted IPs or verified search engines, and texts
+  that also cover real browsers (`chrome`, `mozilla`…) are rejected. They act on what goes to PHP
+  (auth_request); static files do not pass through SmartGuard.
+- Under each IP you see **who it belongs to**: country and organization of the network (e.g.
+  `US · DigitalOcean, LLC`) and the *data center* tag if it is a hosting provider (servers, not
+  people). Source: Team Cymru's IP→ASN over DNS, cached for 24 h; only queried when a table is
+  opened, never when deciding. The country is the **registration country of the network**, not exact
+  geolocation. The *Country* column uses `CF-IPCountry` when present (Cloudflare → Network → IP
+  Geolocation) and, otherwise, that registration country.
+- Security: loopback only, token in `sessionStorage`, CSP `script-src 'self'` and styles with a
+  per-request nonce, no inline scripts.
 
-Acceso: `ssh -L 3100:127.0.0.1:3100 usuario@vps` y abrir `http://127.0.0.1:3100/dashboard/`
-(el token es el `ADMIN_TOKEN` de `/etc/smartguard/smartguard.env`).
+Access: `ssh -L 3100:127.0.0.1:3100 user@vps` and open `http://127.0.0.1:3100/dashboard/`
+(the token is the `ADMIN_TOKEN` of `/etc/smartguard/smartguard.env`).
 
-Compilar: `npm run build:dashboard` (o `cd dashboard && npm ci && npx ng build`). `install.sh`/`update.sh`
-usan el build incluido en `dashboard/dist/browser` o lo compilan. Desarrollo:
-`cd dashboard && npx ng serve --proxy-config proxy.conf.json` (con SmartGuard en 127.0.0.1:3100).
+Build: `npm run build:dashboard` (or `cd dashboard && npm ci && npx ng build`). `install.sh`/`update.sh`
+use the build included in `dashboard/dist/browser` or compile it. Development:
+`cd dashboard && npx ng serve --proxy-config proxy.conf.json` (with SmartGuard on 127.0.0.1:3100).
 
 ## 14. Tests
 
 ```bash
 npm ci
-npm test                         # unitarios + integración HTTP (sin Redis)
-# Lua contra Redis real (en el servidor, DB de pruebas):
+npm test                         # unit + HTTP integration (no Redis)
+# Lua against a real Redis (on the server, test DB):
 SMARTGUARD_TEST_REDIS=1 REDIS_DB=15 npx jest tests/integration/redis-lua
 ```
 
-Cubre: visitante normal, NAT 500 peticiones, WooCommerce `wc-ajax`, `admin-ajax`, Multisite
-`/site1/wp-admin/`, scanner (.env/.git/shell/phpinfo/phpunit), reincidencia, AUDIT, IPv6 /64,
-huella vs IP (NAT), Googlebot falso (incl. PTR falsificado), Googlebot real (IPv4/IPv6), allowlist,
-`action: block`, decay, Redis caído (fail-open), credential stuffing, logins exitosos, doble conteo
-analizador/decisión, enumeración de plugins, anti-ReDoS, todas las reglas del repo contra rutas
-legítimas, API admin, validación por decoradores, allowlist por dominio/subdominio/host, desbloqueo completo, cambio de modo en caliente y CSP del dashboard.
+Covers: normal visitor, NAT with 500 requests, WooCommerce `wc-ajax`, `admin-ajax`, Multisite
+`/site1/wp-admin/`, scanner (.env/.git/shell/phpinfo/phpunit), recidivism, AUDIT, IPv6 /64,
+fingerprint vs IP (NAT), fake Googlebot (incl. forged PTR), real Googlebot (IPv4/IPv6), allowlist,
+`action: block`, decay, Redis down (fail-open), credential stuffing, successful logins, analyzer/decision
+double counting, plugin enumeration, anti-ReDoS, every rule of the repo against legitimate paths, admin
+API, decorator validation, allowlist by domain/subdomain/host, full unblock, live mode change, dashboard
+CSP, per-site statistics, vhost editing, dashboard rules and backup export/import.
 
-Pruebas en el servidor: `scripts/test-attacks.sh` (seguro, IPs de documentación) y
-`scripts/loadtest.sh` (baseline vs SmartGuard).
+Tests on the server: `scripts/test-attacks.sh` (safe, documentation IPs) and `scripts/loadtest.sh`
+(baseline vs SmartGuard).
 
 ## 15. Troubleshooting
 
-| Síntoma | Comprobar |
+| Symptom | Check |
 |---|---|
-| `nginx -t` falla tras instalar | `nginx -T | grep -n smartguard`; ¿realip duplicado? → reinstalar con `--skip-realip` |
-| Todo el tráfico sale con la IP de Cloudflare | realip no activo: `nginx -T | grep real_ip` |
-| `x-smartguard-decision: UNAUTHENTICATED` en logs | `sudo smartguard nginx-sync` (secreto desincronizado) |
-| SmartGuard no arranca | `journalctl -u smartguard -n 80 --no-pager` (ADMIN_TOKEN corto, YAML inválido, Node en /home) |
-| Dashboard/CLI 401 | `ADMIN_TOKEN` del .env; CLI con `sudo` |
-| `degraded: true` | Redis caído o `REDIS_PASSWORD`/`REDIS_DB` incorrectos |
-| Un cliente legítimo bloqueado | `sudo smartguard ip <IP>` → `unban` → allowlist o ajustar regla |
-| Analizador sin datos | `ls -l /var/log/nginx/smartguard/`; `id smartguard` (grupo adm) |
+| `nginx -t` fails after installing | `nginx -T | grep -n smartguard`; duplicated realip? → reinstall with `--skip-realip` |
+| All traffic shows Cloudflare's IP | realip not active: `nginx -T | grep real_ip` |
+| `x-smartguard-decision: UNAUTHENTICATED` in logs | `sudo smartguard nginx-sync` (secret out of sync) |
+| SmartGuard does not start | `journalctl -u smartguard -n 80 --no-pager` (short ADMIN_TOKEN, invalid YAML, Node under /home) |
+| Dashboard/CLI 401 | `ADMIN_TOKEN` of the .env; CLI with `sudo` |
+| `degraded: true` | Redis down or wrong `REDIS_PASSWORD`/`REDIS_DB` |
+| A legitimate customer is blocked | `sudo smartguard ip <IP>` → `unban` → allowlist or adjust the rule |
+| Analyzer without data | `ls -l /var/log/nginx/smartguard/`; `id smartguard` (group adm) |
 
-## 16. Rollback, actualización y desinstalación
+## 16. Rollback, update and uninstall
 
 ```bash
-sudo /opt/smartguard/scripts/rollback-nginx.sh --disable      # neutraliza SmartGuard en Nginx (reversible)
-sudo smartguard nginx-enable                                  # deshace lo anterior
+sudo /opt/smartguard/scripts/rollback-nginx.sh --disable      # neutralizes SmartGuard in Nginx (reversible)
+sudo smartguard nginx-enable                                  # undoes the above
 sudo /opt/smartguard/scripts/rollback-nginx.sh --list
 sudo /opt/smartguard/scripts/rollback-nginx.sh --restore /etc/nginx/backups/nginx-….tar.gz
-sudo smartguard protect tienda.com otra.com                   # añade la protección a esos sitios (edita su vhost, nginx -t, recarga)
-sudo smartguard protect tienda.com --dry-run                  # solo enseña qué líneas añadiría
-sudo smartguard unprotect tienda.com                          # quita los include de SmartGuard de ese sitio
-sudo smartguard protected                                     # sitios registrados con «protect»
-sudo smartguard backup                                        # copia completa en /root/smartguard-backup-….tar.gz
-sudo smartguard restore /root/smartguard-backup-….tar.gz      # la restaura en este servidor (--keep-env: conserva su .env)
-sudo smartguard update                                        # si hay cambios en GitHub, los descarga e instala
-sudo smartguard update --check                                # solo dice si hay una versión nueva
-cd nueva-version && sudo ./scripts/update.sh                  # lo mismo a mano, desde una copia ya descargada
+sudo smartguard protect shop.com other.com                    # adds the protection to those sites (edits the vhost, nginx -t, reload)
+sudo smartguard protect shop.com --dry-run                    # only shows which lines it would add
+sudo smartguard unprotect shop.com                            # removes the SmartGuard includes from that site
+sudo smartguard protected                                     # sites registered with "protect"
+sudo smartguard backup                                        # full backup in /root/smartguard-backup-….tar.gz
+sudo smartguard restore /root/smartguard-backup-….tar.gz      # restores it on this server (--keep-env: keeps its .env)
+sudo smartguard update                                        # if there are changes on GitHub, downloads and installs them
+sudo smartguard update --check                                # only says whether there is a new version
+cd new-version && sudo ./scripts/update.sh                    # the same by hand, from an already downloaded copy
 sudo /opt/smartguard/scripts/update.sh --revert
 sudo /opt/smartguard/scripts/uninstall.sh [--purge]
 ```
 
-`smartguard backup` empaqueta `/etc/smartguard`, `/etc/nginx/smartguard`, las listas que viven en Redis
-(lista blanca dinámica, bloqueos manuales de IP, bots y redes bloqueados), los vhosts protegidos y una
-copia de todo `/etc/nginx`. `smartguard restore` aplica configuración, fragmentos y listas (con `nginx -t`
-y vuelta atrás si algo falla) y repone la protección en los sitios registrados; **no** sobrescribe
-`/etc/nginx` entero: los vhosts y `nginx-full.tar.gz` van en la copia como referencia. Para llevarlo a
-otro servidor: instalar SmartGuard allí (`install.sh`), copiar el archivo y ejecutar `restore`.
+`smartguard backup` packs `/etc/smartguard`, `/etc/nginx/smartguard`, the lists kept in Redis (dynamic
+allowlist, manual IP blocks, blocked bots and networks, dashboard rules), the protected vhosts and a
+copy of all of `/etc/nginx`. `smartguard restore` applies configuration, snippets and lists (with
+`nginx -t` and rollback if anything fails) and restores the protection on the registered sites; it does
+**not** overwrite `/etc/nginx` as a whole: the vhosts and `nginx-full.tar.gz` travel in the backup as a
+reference. To move to another server: install SmartGuard there (`install.sh`), copy the file and run
+`restore`.
 
-Los sitios añadidos con `smartguard protect` quedan registrados en `/etc/smartguard/protected-sites`.
-CloudPanel guarda su propia copia de cada vhost y reescribe el archivo entero cuando se guarda desde su
-panel, con lo que se pierden los include: `smartguard-reprotect.path` vigila `/etc/nginx/sites-enabled`
-y, en cuanto cambia algo, `smartguard reprotect` los repone en los sitios registrados (con `nginx -t`;
-si Nginx los rechaza deja el vhost como estaba y no reintenta hasta que el vhost cambie de nuevo).
-Para dejar de proteger un sitio hay que usar `smartguard unprotect`, no borrar las líneas a mano.
+Sites added with `smartguard protect` are recorded in `/etc/smartguard/protected-sites`. CloudPanel
+keeps its own copy of each vhost and rewrites the whole file when it is saved from its panel, which
+drops the includes: `smartguard-reprotect.path` watches `/etc/nginx/sites-enabled` and, as soon as
+something changes, `smartguard reprotect` puts them back in the registered sites (with `nginx -t`; if
+Nginx rejects them it leaves the vhost as it was and does not retry until the vhost changes again). To
+stop protecting a site use `smartguard unprotect`; do not delete the lines by hand.
 
-`smartguard update` compara el commit instalado (`/opt/smartguard/COMMIT`) con la rama `UPDATE_BRANCH`
-de `UPDATE_REPO`. Si coinciden no hace nada; si no, descarga a `/opt/smartguard-src` y ejecuta
-`update.sh`, que conserva `.env`, reglas, sitios y allowlists y vuelve atrás solo si la nueva versión
-no arranca.
+`smartguard update` compares the installed commit (`/opt/smartguard/COMMIT`) with the `UPDATE_BRANCH`
+branch of `UPDATE_REPO`. If they match it does nothing; otherwise it downloads to `/opt/smartguard-src`
+and runs `update.sh`, which keeps `.env`, rules, sites and allowlists and goes back by itself if the
+new version does not start.
 
 ## 17. Roadmap
 
-- **V1 (este repositorio):** hardening Nginx, IP real Cloudflare, Redis, scoring + reglas,
-  AUDIT/ENFORCE, bans con reincidencia, analizador de logs, `auth_request` fail-open, systemd, CLI,
-  tests. Incluidos también (seguros y opcionales): nftables, origin-lock, API Cloudflare, dashboard,
-  métricas Prometheus, alertas por webhook.
-- **V2:** Unix socket para la API; geo de Nginx con rangos oficiales de Googlebot/Bingbot
-  (googlebot.json, bingbot.json) para verificar sin DNS; mu-plugin opcional de WordPress que informe
-  de logins fallidos (hash del usuario, sin contraseñas) para detectar "muchos usernames"; alertas
-  Telegram/email; histórico opcional en PostgreSQL (asíncrono, fuera del camino crítico).
-- **V3:** detección estadística (líneas base por endpoint/hora, anomalías por sitio), interfaz para
-  modelos ML fuera del camino crítico.
+- **V1 (this repository):** Nginx hardening, Cloudflare real IP, Redis, scoring + rules,
+  AUDIT/ENFORCE, bans with recidivism, log analyzer, fail-open `auth_request`, systemd, CLI, tests.
+  Also included (safe and optional): nftables, origin-lock, Cloudflare API, dashboard, Prometheus
+  metrics, webhook alerts, Docker Compose stack.
+- **V2:** Unix socket for the API; Nginx geo with the official Googlebot/Bingbot ranges
+  (googlebot.json, bingbot.json) to verify without DNS; optional WordPress mu-plugin reporting failed
+  logins (user hash, no passwords) to detect "many usernames"; Telegram/email alerts; optional history
+  in PostgreSQL (asynchronous, off the critical path).
+- **V3:** statistical detection (baselines per endpoint/hour, per-site anomalies), an interface for
+  ML models off the critical path.
 
-## 18. Limitaciones conocidas (honestas)
+## 18. Known limitations (honest)
 
-- La configuración Nginx y los scripts bash **no se han ejecutado en un servidor real** en este
-  entorno de desarrollo (Windows): `bash -n` y shellcheck pasan, y el instalador valida todo con
-  `nginx -t` antes de recargar y revierte si falla. Ejecuta primero `install.sh --dry-run`.
-- El script Lua se verificó en una VM Lua con un `redis.call` simulado frente a la implementación en
-  memoria (resultados idénticos). Confírmalo en el servidor con el test `redis-lua` (sección 14).
-- `RATE_LIMIT` de SmartGuard llega al cliente como 403 (limitación de `auth_request`, ver sección 6).
-- Sin el cuerpo de las peticiones (privacidad) no se cuentan usernames distintos en wp-login; se
-  detecta credential stuffing por volumen de logins fallidos (POST 200) por IP y por huella.
-- GeoIP: solo como contexto a partir de `CF-IPCountry` cuando la conexión viene de Cloudflare; no se
-  bloquean países.
-- Si la cabecera `CF-IPCountry` no llega (sitio sin proxy), no hay país.
+- The Nginx configuration and bash scripts were developed on Windows: `bash -n` passes, and the
+  installer validates everything with `nginx -t` before reloading and reverts if it fails. Run
+  `install.sh --dry-run` first.
+- The Docker images and the Compose stack were written without a Docker engine at hand: the
+  container start script and the service were tested separately, but `docker compose up` was not.
+  See the checklist in [docs/docker.md](docs/docker.md).
+- The Lua script was verified in a Lua VM with a simulated `redis.call` against the in-memory
+  implementation (identical results). Confirm it on the server with the `redis-lua` test (section 14).
+- SmartGuard's `RATE_LIMIT` reaches the client as 403 (an `auth_request` limitation, see section 6).
+- Without the request body (privacy), distinct usernames in wp-login are not counted; credential
+  stuffing is detected by the volume of failed logins (POST 200) per IP and per fingerprint.
+- GeoIP: only as context from `CF-IPCountry` when the connection comes through Cloudflare; countries
+  are not blocked.
+- If the `CF-IPCountry` header does not arrive (site without the proxy), there is no country.

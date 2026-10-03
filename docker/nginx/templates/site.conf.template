@@ -1,0 +1,45 @@
+# Site protected by SmartGuard. Generated at container start from
+# /etc/nginx/templates/site.conf.template: ${SERVER_NAME} and ${APP_UPSTREAM} come from the environment.
+# To customize it, mount your own file over that path.
+
+# If another proxy in front (Cloudflare, a load balancer) already terminated HTTPS, keep its scheme.
+map $http_x_forwarded_proto $sg_proto {
+    default $scheme;
+    https   https;
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${SERVER_NAME};
+
+    # SmartGuard: Nginx rules, per-endpoint limits and security log…
+    include /etc/nginx/smartguard/server.conf;
+    # …and the internal locations used by auth_request.
+    include /etc/nginx/smartguard/auth.conf;
+
+    client_max_body_size 64m;
+
+    # Docker's embedded DNS. The application is resolved per request, so Nginx starts (and keeps
+    # running) even while the application container is down.
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    set $sg_app ${APP_UPSTREAM};
+
+    proxy_http_version 1.1;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Real-IP         $remote_addr;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $sg_proto;
+
+    # Static files never ask SmartGuard; only their 4xx responses go to the security log.
+    location ~* \.(?:png|jpe?g|gif|svg|webp|avif|ico|ttf|otf|eot|woff2?|css|js|mjs|map|mp4|webm|mp3|ogg|txt)$ {
+        include /etc/nginx/smartguard/static-log.conf;
+        proxy_pass $sg_app;
+    }
+
+    # Everything else reaches the application only after SmartGuard's decision.
+    location / {
+        include /etc/nginx/smartguard/auth-php.conf;
+        proxy_pass $sg_app;
+    }
+}

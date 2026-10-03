@@ -1,0 +1,12 @@
+.git
+.gitignore
+node_modules
+dist
+coverage
+tests
+dashboard/node_modules
+dashboard/dist
+dashboard/.angular
+.env
+*.log
+docker/config

@@ -1,0 +1,9 @@
+# Shell scripts and container files must keep LF line endings on every platform
+# (a CRLF checkout breaks sh, the Nginx templates and the Docker build).
+*.sh text eol=lf
+bin/smartguard text eol=lf
+scripts/smartguard-fw-sync text eol=lf
+Dockerfile text eol=lf
+docker/** text eol=lf
+nginx/** text eol=lf
+*.template text eol=lf

@@ -2,6 +2,7 @@ import { CanActivate, ExecutionContext, HttpException, HttpStatus, Injectable, U
 import { timingSafeEqual, createHash } from 'node:crypto';
 import type { FastifyRequest } from 'fastify';
 import { ConfigService } from '../config/config.service';
+import { CidrSet, parseIp } from './ip.util';
 
 export function isLoopbackAddress(addr: string | undefined): boolean {
   if (!addr) return false;
@@ -15,12 +16,30 @@ export function safeEqual(a: string, b: string): boolean {
   return timingSafeEqual(ha, hb) && a.length === b.length;
 }
 
-/** Rechaza cualquier petición que no venga de loopback (defensa adicional a BIND_ADDRESS=127.0.0.1). */
+const localSets = new WeakMap<object, CidrSet>();
+
+/**
+ * ¿La conexión es local? Loopback siempre; además, las redes de LOCAL_NETWORKS (vacío por defecto).
+ * En un despliegue con Docker, Nginx y el puerto publicado en el host llegan desde la red interna de
+ * los contenedores, no desde 127.0.0.1: esa red se declara ahí. Nunca debe incluir redes públicas.
+ */
+export function isLocalAddress(addr: string | undefined, config: ConfigService): boolean {
+  if (isLoopbackAddress(addr)) return true;
+  const nets = config.env.localNetworks;
+  if (!addr || !nets || nets.length === 0) return false;
+  let set = localSets.get(nets);
+  if (!set) localSets.set(nets, (set = new CidrSet(nets)));
+  return set.contains(parseIp(addr));
+}
+
+/** Rechaza cualquier petición que no sea local (defensa adicional a BIND_ADDRESS=127.0.0.1). */
 @Injectable()
 export class LocalOnlyGuard implements CanActivate {
+  constructor(private readonly config: ConfigService) {}
+
   canActivate(ctx: ExecutionContext): boolean {
     const req = ctx.switchToHttp().getRequest<FastifyRequest>();
-    if (!isLoopbackAddress(req.socket.remoteAddress)) throw new ForbiddenException('solo loopback');
+    if (!isLocalAddress(req.socket.remoteAddress, this.config)) throw new ForbiddenException('solo loopback');
     return true;
   }
 }
@@ -56,7 +75,7 @@ export class AdminAuthGuard implements CanActivate {
   canActivate(ctx: ExecutionContext): boolean {
     const req = ctx.switchToHttp().getRequest<FastifyRequest>();
     const remote = req.socket.remoteAddress ?? '?';
-    if (!isLoopbackAddress(remote)) throw new ForbiddenException('solo loopback');
+    if (!isLocalAddress(remote, this.config)) throw new ForbiddenException('solo loopback');
     if (!this.limiter.allow(remote)) throw new HttpException('demasiadas peticiones', HttpStatus.TOO_MANY_REQUESTS);
     const token = this.config.env.adminToken;
     if (!token) throw new ForbiddenException('ADMIN_TOKEN no configurado');

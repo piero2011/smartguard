@@ -1,0 +1,125 @@
+# SmartGuard with Docker Compose: Nginx (with the SmartGuard rules) + decision service + Redis,
+# in front of your application.
+#
+#   cp docker/env.example .env      # then set ADMIN_TOKEN, DECISION_SHARED_SECRET, SERVER_NAME, APP_UPSTREAM
+#   docker compose up -d --build
+#   docker compose --profile demo up -d --build     # same, plus a demo WordPress to try it
+#
+# Guide: docs/docker.md (English) · docs/docker.es.md (español)
+
+name: smartguard
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    volumes:
+      - redis_data:/data
+    networks: [smartguard]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  smartguard:
+    build:
+      context: .
+    image: smartguard:local
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      # Inside the container the service must listen on all interfaces; access is still limited
+      # to loopback and to the Compose network declared in LOCAL_NETWORKS (plus the admin token).
+      BIND_ADDRESS: 0.0.0.0
+      ALLOW_NON_LOOPBACK_BIND: "true"
+      LOCAL_NETWORKS: 172.30.77.0/24
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      ENABLE_NFTABLES: "false"
+    ports:
+      # Dashboard and admin API, reachable only from the Docker host itself.
+      - "127.0.0.1:${DASHBOARD_PORT:-3100}:3100"
+    volumes:
+      - smartguard_data:/var/lib/smartguard
+      # Security log written by Nginx (read by the log analyzer) and the generated vhosts
+      # (read by the "sites" list of the dashboard).
+      - nginx_logs:/var/log/nginx/smartguard:ro
+      - nginx_conf:/etc/nginx/conf.d:ro
+      # Optional: your own rules.yaml / sites.yaml / bots.yaml / rules.d/*.yaml
+      - ./docker/config:/etc/smartguard:ro
+    networks: [smartguard]
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+
+  nginx:
+    build:
+      context: .
+      dockerfile: docker/nginx/Dockerfile
+    image: smartguard-nginx:local
+    restart: unless-stopped
+    depends_on:
+      smartguard:
+        condition: service_healthy
+    environment:
+      DECISION_SHARED_SECRET: ${DECISION_SHARED_SECRET:?set DECISION_SHARED_SECRET in .env}
+      AUDIT_MODE: ${AUDIT_MODE:-true}
+      ADMIN_ALLOWLIST: ${ADMIN_ALLOWLIST:-}
+      SERVICE_ALLOWLIST: ${SERVICE_ALLOWLIST:-}
+      TRUSTED_NETWORKS: ${TRUSTED_NETWORKS:-}
+      SERVER_NAME: ${SERVER_NAME:-_}
+      APP_UPSTREAM: ${APP_UPSTREAM:-http://wordpress:80}
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    volumes:
+      - nginx_logs:/var/log/nginx/smartguard
+      - nginx_conf:/etc/nginx/conf.d
+    networks: [smartguard]
+
+  # --- Demo application (only with: --profile demo). Replace it with your own. ---------------
+  wordpress:
+    profiles: [demo]
+    image: wordpress:6-apache
+    restart: unless-stopped
+    depends_on: [db]
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: ${WORDPRESS_DB_PASSWORD:-change-me}
+      WORDPRESS_DB_NAME: wordpress
+    volumes:
+      - wordpress_data:/var/www/html
+    networks: [smartguard]
+
+  db:
+    profiles: [demo]
+    image: mariadb:11
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: wordpress
+      MARIADB_USER: wordpress
+      MARIADB_PASSWORD: ${WORDPRESS_DB_PASSWORD:-change-me}
+      MARIADB_RANDOM_ROOT_PASSWORD: "1"
+    volumes:
+      - db_data:/var/lib/mysql
+    networks: [smartguard]
+
+networks:
+  smartguard:
+    ipam:
+      config:
+        # Fixed so that LOCAL_NETWORKS above can name it. Change both if it collides with yours.
+        - subnet: 172.30.77.0/24
+
+volumes:
+  redis_data:
+  smartguard_data:
+  nginx_logs:
+  nginx_conf:
+  wordpress_data:
+  db_data:

@@ -79,6 +79,11 @@ export interface EnvConfig {
   adminAllowlist: string[];
   serviceAllowlist: string[];
   trustedNetworks: string[];
+  /**
+   * Redes desde las que se aceptan la API, el panel y la decisión además de loopback. Vacío por
+   * defecto. Solo para despliegues en contenedores, donde Nginx y el host llegan por la red de Docker.
+   */
+  localNetworks: string[];
   allowHosts: string[];
   allowDomainRefreshSec: number;
 
@@ -172,6 +177,7 @@ export function loadEnv(): EnvConfig {
     adminAllowlist: list('ADMIN_ALLOWLIST'),
     serviceAllowlist: list('SERVICE_ALLOWLIST'),
     trustedNetworks: list('TRUSTED_NETWORKS'),
+    localNetworks: list('LOCAL_NETWORKS'),
     allowHosts: list('ALLOW_HOSTS'),
     allowDomainRefreshSec: int('ALLOW_DOMAIN_REFRESH_SEC', 600, 60, 86400),
 
