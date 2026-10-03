@@ -27,6 +27,7 @@ const RANGES = [60, 360, 1440] as const;
     <section class="card">
       <h2>{{ 'ov.chartTitle' | t }}</h2>
       <p class="muted sub">{{ 'ov.chartHint' | t }}</p>
+      <p class="hero"><b>{{ summary().pct }}%</b> {{ 'ov.heroText' | t: { stopped: summary().stopped, total: summary().total } }}</p>
       <sg-chart [times]="times()" [series]="series()" />
     </section>
     <div class="cards">
@@ -81,14 +82,28 @@ export class OverviewComponent {
   readonly lastUa = signal<Record<string, string>>({});
 
   readonly times = computed(() => (this.stats()?.series ?? []).map((p) => p.t));
-  /** Las tres líneas del gráfico: lo evaluado, lo que bloqueó SmartGuard y lo que Nginx paró antes de PHP. */
+  /**
+   * Las tres líneas del gráfico, SIN solaparse (cada petición cuenta en una sola):
+   *  - permitidas: SmartGuard las evaluó y pasaron a WordPress;
+   *  - bloqueadas por SmartGuard (403/429 que decidió SmartGuard);
+   *  - detenidas por reglas de Nginx: el resto de lo que no llegó a PHP. El contador "php_avoided"
+   *    incluye también lo que bloqueó SmartGuard, por eso se le resta.
+   */
   readonly series = computed<ChartSeries[]>(() => {
     const pts = this.stats()?.series ?? [];
+    const blocked = (p: Record<string, number>) => (p['blocked_403'] ?? 0) + (p['limited_429'] ?? 0);
     return [
-      { key: 'ov.s.requests', values: pts.map((p) => p['requests'] ?? 0) },
-      { key: 'ov.s.blocked', values: pts.map((p) => (p['blocked_403'] ?? 0) + (p['limited_429'] ?? 0)) },
-      { key: 'ov.s.nginx', values: pts.map((p) => p['php_avoided'] ?? 0) },
+      { key: 'ov.s.allowed', values: pts.map((p) => Math.max(0, (p['requests'] ?? 0) - blocked(p))) },
+      { key: 'ov.s.blocked', values: pts.map(blocked) },
+      { key: 'ov.s.nginx', values: pts.map((p) => Math.max(0, (p['php_avoided'] ?? 0) - blocked(p))) },
     ];
+  });
+  /** Cifra principal: cuánto se detuvo antes de llegar a WordPress, sobre el total del periodo. */
+  readonly summary = computed(() => {
+    const [allowed, blocked, nginx] = this.series().map((s) => s.values.reduce((a, b) => a + b, 0));
+    const stopped = (blocked ?? 0) + (nginx ?? 0);
+    const total = stopped + (allowed ?? 0);
+    return { stopped, total, pct: total ? Math.round((stopped / total) * 100) : 0 };
   });
 
   constructor() {

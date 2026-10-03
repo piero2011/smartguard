@@ -138,7 +138,7 @@ export class ChartComponent implements OnDestroy {
 
   /** La etiqueta flotante pasa al otro lado del cursor en la mitad derecha, para no salirse. */
   tipLeft(i: number): number {
-    return this.x(i) > this.width() / 2 ? this.x(i) - 262 : this.x(i) + 12;
+    return this.x(i) > this.width() / 2 ? this.x(i) - 282 : this.x(i) + 12;
   }
 
   fmt(v: number): string {
