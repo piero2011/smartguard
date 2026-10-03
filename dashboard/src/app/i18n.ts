@@ -187,6 +187,9 @@ const EN: Dict = {
 
   'ip.hosting': 'data center',
 
+  'st.ipBlocked': 'IP blocked',
+  'st.botBlocked': 'Bot blocked',
+  'st.netBlocked': 'Network blocked',
   'net.block': 'Block network',
   'net.confirmBlock': 'Block the WHOLE network {org}? Every IP of that provider is blocked until you unblock it, also in AUDIT mode. Allowlisted IPs keep working. Do it only for hosting networks: on an Internet provider it would block real customers.',
   'net.blocked': 'Network {org} (AS{asn}) blocked: {count} ranges.',
@@ -415,6 +418,9 @@ const ES: Dict = {
 
   'ip.hosting': 'centro de datos',
 
+  'st.ipBlocked': 'IP bloqueada',
+  'st.botBlocked': 'Bot bloqueado',
+  'st.netBlocked': 'Red bloqueada',
   'net.block': 'Bloquear red',
   'net.confirmBlock': '¿Bloquear TODA la red {org}? Se bloquean todas las IPs de ese proveedor hasta que la desbloquees, también en modo AUDIT. Las IPs de la lista blanca siguen funcionando. Hazlo solo con redes de hosting: en una operadora de internet bloquearías a clientes reales.',
   'net.blocked': 'Red {org} (AS{asn}) bloqueada: {count} rangos.',

@@ -84,6 +84,8 @@ export interface Stats {
 export interface SecurityEvent {
   timestamp: number;
   ip: string;
+  /** clave de reputación (en IPv6, su /64): por ella se guardan los bloqueos */
+  ipKey?: string;
   host: string;
   method: string;
   uri: string;

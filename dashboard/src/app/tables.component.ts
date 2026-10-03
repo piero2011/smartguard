@@ -1,13 +1,14 @@
 import { Component, computed, effect, inject, signal } from '@angular/core';
 import { AllowList, Api, ApiErr, BanRecord, BlockedBot, BlockedNetwork, SecurityEvent, Stats, isPermanent } from './api.service';
 import { I18n, TPipe } from './i18n';
-import { BlockActions, EventFilter, Ui } from './ui';
-import { IpComponent, IpInfoStore } from './ipinfo';
+import { EventFilter, Ui } from './ui';
+import { IpComponent } from './ipinfo';
+import { BlockButtonsComponent } from './block.component';
 
 /** Resumen: tarjetas + top rutas / IPs / reglas */
 @Component({
   selector: 'sg-overview',
-  imports: [TPipe, IpComponent],
+  imports: [TPipe, IpComponent, BlockButtonsComponent],
   template: `
   @if (stats(); as s) {
     <div class="cards">
@@ -28,10 +29,7 @@ import { IpComponent, IpInfoStore } from './ipinfo';
           @for (r of s.topIps; track r.member) {
             <tr><td class="ip"><sg-ip [ip]="r.member" /></td><td class="num">{{ r.score }}</td>
               <td class="actions"><button class="small" (click)="inspect(r.member)">{{ 'common.inspect' | t }}</button>
-                <button class="small danger" (click)="actions.blockIp(r.member)">{{ 'ev.blockIp' | t }}</button>
-                @if (ipinfo.network(r.member); as n) {
-                  <button class="small danger" [title]="n.org" (click)="actions.blockNetwork(r.member, n.org)">{{ 'net.block' | t }}</button>
-                }</td></tr>
+                <sg-block [ip]="r.member" [ipKey]="r.member" [userAgent]="lastUa()[r.member] ?? ''" /></td></tr>
           } @empty { <tr><td colspan="3" class="muted">{{ 'common.none' | t }}</td></tr> }
         </table></section>
       <section class="card"><h2>{{ 'ov.topRules' | t }}</h2>
@@ -48,9 +46,9 @@ import { IpComponent, IpInfoStore } from './ipinfo';
 export class OverviewComponent {
   private readonly api = inject(Api);
   readonly ui = inject(Ui);
-  readonly actions = inject(BlockActions);
-  readonly ipinfo = inject(IpInfoStore);
   readonly stats = signal<Stats | null>(null);
+  /** clave de IP → su User-Agent más reciente (de los eventos), para poder bloquear el bot desde aquí */
+  readonly lastUa = signal<Record<string, string>>({});
 
   constructor() {
     effect(() => {
@@ -64,6 +62,18 @@ export class OverviewComponent {
       this.stats.set(await this.api.stats(60));
     } catch (e) {
       this.ui.notify('error', () => this.api.describe(e as ApiErr));
+    }
+    try {
+      const ua: Record<string, string> = {};
+      // los eventos llegan del más reciente al más antiguo: se queda el primero de cada IP
+      for (const e of await this.api.events(1000)) {
+        if (!e.userAgent) continue;
+        ua[e.ipKey ?? e.ip] ??= e.userAgent;
+        ua[e.ip] ??= e.userAgent;
+      }
+      this.lastUa.set(ua);
+    } catch {
+      /* sin eventos no se ofrece "Bloquear bot" en esta tabla */
     }
   }
 
@@ -266,22 +276,6 @@ export class AllowlistComponent {
   }
 }
 
-/** Productos de User-Agent que llevan los navegadores: nunca se proponen como nombre de bot. */
-const BROWSER_TOKENS = new Set(['mozilla', 'applewebkit', 'chrome', 'safari', 'gecko', 'firefox', 'version', 'mobile', 'edg', 'opr', 'crios', 'fxios']);
-
-/**
- * Propone el texto a bloquear a partir de un User-Agent: el nombre propio del bot
- * ("Mozilla/5.0 (compatible; DotBot/1.2; +https://…)" → "DotBot", "python-requests/2.31" → "python-requests").
- * Devuelve '' si parece un navegador normal (el administrador escribe el texto a mano).
- */
-export function suggestBotPattern(userAgent: string): string {
-  const ua = userAgent.replace(/https?:\/\/\S+/g, ' ');
-  const named = /[A-Za-z][\w.-]*(?:bot|spider|crawl|scrap|scan|fetch|http|client|lib)[\w.-]*/i.exec(ua);
-  if (named) return named[0].slice(0, 64);
-  const product = /^\s*([A-Za-z][\w.-]{2,63})(?:\/|\s|$)/.exec(ua);
-  return product && !BROWSER_TOKENS.has(product[1]!.toLowerCase()) ? product[1]! : '';
-}
-
 /** Redes completas (ASN) bloqueadas: lista y baja. Se bloquean desde una fila de Eventos o del Resumen. */
 @Component({
   selector: 'sg-blocked-networks',
@@ -421,7 +415,7 @@ const EVENT_FILTERS: Record<EventFilter, (e: SecurityEvent) => boolean> = {
 /** Eventos de seguridad recientes */
 @Component({
   selector: 'sg-events',
-  imports: [TPipe, IpComponent],
+  imports: [TPipe, IpComponent, BlockButtonsComponent],
   template: `
   <section class="card">
     <div class="row between">
@@ -448,11 +442,7 @@ const EVENT_FILTERS: Record<EventFilter, (e: SecurityEvent) => boolean> = {
           <td class="reason">{{ e.reason }}</td>
           <td class="actions">
             <button class="small" (click)="inspect(e.ip)">{{ 'common.inspect' | t }}</button>
-            <button class="small danger" (click)="blockIp(e)">{{ 'ev.blockIp' | t }}</button>
-            @if (e.userAgent) { <button class="small danger" (click)="blockBot(e)">{{ 'ev.blockBot' | t }}</button> }
-            @if (ipinfo.network(e.ip); as n) {
-              <button class="small danger" [title]="n.org" (click)="actions.blockNetwork(e.ip, n.org)">{{ 'net.block' | t }}</button>
-            }
+            <sg-block [ip]="e.ip" [ipKey]="e.ipKey ?? ''" [userAgent]="e.userAgent ?? ''" />
           </td></tr>
       } @empty { <tr><td colspan="10" class="muted">{{ 'common.none' | t }}</td></tr> }
     </table></div>
@@ -464,8 +454,6 @@ export class EventsComponent {
   readonly ui = inject(Ui);
   readonly i18n = inject(I18n);
   readonly events = signal<SecurityEvent[]>([]);
-  readonly actions = inject(BlockActions);
-  readonly ipinfo = inject(IpInfoStore);
   readonly filters: EventFilter[] = ['all', 'log', 'suspicious', 'wouldBlock', 'blocked', 'limited', 'st403', 'st429', 'denied'];
 
   /** Eventos que pasan el filtro elegido y el texto buscado (IP, ruta, motivo, host o User-Agent). */
@@ -498,25 +486,6 @@ export class EventsComponent {
   }
   isWarn(e: SecurityEvent): boolean {
     return e.action === 'WOULD_BLOCK' || e.action === 'WOULD_RATE_LIMIT';
-  }
-
-  /** Bloquea la IP del evento hasta que se desbloquee a mano. */
-  blockIp(e: SecurityEvent): Promise<void> {
-    return this.actions.blockIp(e.ip);
-  }
-
-  /** Bloquea el bot del evento por su nombre (texto del User-Agent), venga de la IP que venga. */
-  async blockBot(e: SecurityEvent): Promise<void> {
-    const ua = e.userAgent ?? '';
-    const pattern = prompt(this.i18n.t('ev.promptBot', { ua }), suggestBotPattern(ua))?.trim();
-    if (!pattern) return;
-    try {
-      const b = await this.api.blockBot({ pattern, note: ua.slice(0, 200) });
-      this.ui.notify('ok', () => this.i18n.t('ev.botBlocked', { pattern: b.pattern }));
-      this.ui.bump();
-    } catch (err) {
-      this.ui.notify('error', () => this.api.describe(err as ApiErr));
-    }
   }
 
   async inspect(ip: string): Promise<void> {
