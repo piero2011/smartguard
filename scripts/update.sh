@@ -29,6 +29,8 @@ for a in "$@"; do
 done
 require_root
 [ -d "$SG_OPT" ] || die "SmartGuard no está instalado (usa install.sh)."
+node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 22 ? 0 : 1)' \
+  || die "Node $(node -v) es demasiado antiguo: esta versión de SmartGuard necesita Node ≥ 22 (NodeSource). No se ha cambiado nada."
 
 health() {
   local port; port=$(env_get PORT); port=${port:-3100}

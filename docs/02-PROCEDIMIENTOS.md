@@ -10,12 +10,13 @@ Todos los comandos se ejecutan en el VPS como un usuario con `sudo`. Donde pone
 ### 13.1 Preparación (sin cambios en el tráfico)
 
 ```bash
-# Paquetes base (nodejs de Debian 13 es 20.x; si ya tienes Node ≥ 20 del sistema, sáltalo)
+# Paquetes base. Node ≥ 22 del sistema: el nodejs de apt en Debian 13 es 20.x y NO sirve;
+# instálalo desde NodeSource (trae npm incluido). Si ya tienes Node ≥ 22 en /usr/bin, sáltalo.
 sudo apt-get update
-sudo apt-get install -y nodejs npm curl openssl tar rsync nftables redis-tools
+sudo apt-get install -y git curl openssl tar rsync nftables redis-tools
 
 # Node debe estar en /usr/bin (NO nvm en /home: systemd usa ProtectHome)
-command -v node && node -v            # ≥ v20.11
+command -v node && node -v            # ≥ v22
 
 # Nginx con los módulos necesarios
 sudo nginx -V 2>&1 | tr ' ' '\n' | grep -E 'auth_request|realip'

@@ -5,7 +5,7 @@
 # Uso:  sudo ./scripts/install.sh [--dry-run] [--yes] [--enable-nftables] [--skip-realip]
 #
 # Qué hace (y qué NO hace):
-#   ✔ Comprueba Node ≥ 20.11, Nginx (auth_request + realip), Redis, dónde cargar el contexto http
+#   ✔ Comprueba Node ≥ 22, Nginx (auth_request + realip), Redis, dónde cargar el contexto http
 #   ✔ Backup COMPLETO de /etc/nginx antes de tocar nada
 #   ✔ Crea usuario de sistema "smartguard" (sin shell, sin home real)
 #   ✔ Instala la app en /opt/smartguard, config en /etc/smartguard (0640 root:smartguard)
@@ -57,13 +57,13 @@ for bin in curl tar openssl nginx systemctl; do
 done
 
 NODE_BIN=$(node_bin)
-[ -n "$NODE_BIN" ] || die "Node.js no encontrado. Instala Node ≥ 20 del sistema (apt-get install -y nodejs npm o NodeSource)."
+[ -n "$NODE_BIN" ] || die "Node.js no encontrado. Instala Node ≥ 22 del sistema (NodeSource; el nodejs de apt en Debian 13 es 20.x y no sirve)."
 case "$NODE_BIN" in
   /home/*|/root/*) die "Node está en $NODE_BIN (nvm/usuario). systemd con ProtectHome no puede usarlo. Instala Node del sistema (apt/NodeSource) en /usr/bin." ;;
 esac
 NODE_VER=$("$NODE_BIN" -p 'process.versions.node')
-"$NODE_BIN" -e 'const [a,b]=process.versions.node.split(".").map(Number); process.exit(a>20||(a===20&&b>=11)?0:1)' \
-  || die "Node $NODE_VER es demasiado antiguo (mínimo 20.11)."
+"$NODE_BIN" -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 22 ? 0 : 1)' \
+  || die "Node $NODE_VER es demasiado antiguo (mínimo 22: lo exige la librería de métricas @prometheus-io/client). Instálalo desde NodeSource."
 command -v npm >/dev/null || die "Falta npm (apt-get install -y npm)."
 ok "Node $NODE_VER en $NODE_BIN"
 

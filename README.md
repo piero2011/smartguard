@@ -85,7 +85,7 @@ smartguard/
 | Componente | Versión | Notas |
 |---|---|---|
 | Debian | 13 | probado para Debian 13 (Trixie) |
-| Node.js | ≥ 20.11 | del sistema (`/usr/bin/node`), no nvm en `/home` |
+| Node.js | ≥ 22 | del sistema (`/usr/bin/node`), no nvm en `/home`. El `nodejs` de apt en Debian 13 es 20.x: usa NodeSource |
 | Nginx | ≥ 1.18 | con `http_auth_request_module` y `http_realip_module` |
 | Redis | ≥ 6 | opcional en la práctica: sin Redis funciona en memoria (modo degradado) |
 | nftables | cualquiera | opcional |
@@ -99,7 +99,7 @@ smartguard/
 | `ioredis` | Cliente Redis mantenido, con `defineCommand` (EVALSHA automático), pipelines, timeouts y backoff |
 | `ipaddr.js` | Parsing IPv4/IPv6/CIDR robusto (lo usa también Express); sin dependencias |
 | `yaml` | Reglas y sitios en YAML legible; sin dependencias |
-| `prom-client` | Métricas Prometheus estándar (histogramas correctos) |
+| `@prometheus-io/client` | Métricas Prometheus estándar (histogramas correctos). Es el antiguo `prom-client`, ahora mantenido por el proyecto Prometheus; misma API. Exige Node ≥ 22 |
 
 No se usan: class-validator/class-transformer ni clases DTO (la validación son decoradores propios, ver §10), dotenv (systemd `EnvironmentFile=`), axios (fetch nativo), `@nestjs/config`,
 `@nestjs/schedule`, `@nestjs/throttler`, helmet (la API es local; el dashboard pone sus cabeceras

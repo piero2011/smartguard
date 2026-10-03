@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Counter, Gauge, Histogram, Registry, collectDefaultMetrics } from 'prom-client';
+import { Counter, Gauge, Histogram, Registry, collectDefaultMetrics } from '@prometheus-io/client';
 
 /**
  * Métricas Prometheus (punto 36). Se exponen en GET /metrics (solo loopback) si ENABLE_PROMETHEUS=true.
