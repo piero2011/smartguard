@@ -257,7 +257,9 @@ rules:
   - id: wp-user-enum-rest
     name: Enumeración de usuarios vía REST
     target: uri
-    pattern: '/wp-json/wp/v2/users|rest_route=%2Fwp%2Fv2%2Fusers|rest_route=/wp/v2/users'
+    # No puntúa lo que pide el propio wp-admin (editor de bloques, WooCommerce Admin): /users/me,
+    # ?context=edit (sin sesión responde 401) y las llamadas de wp.apiFetch (_locale=user).
+    pattern: '(?:/wp-json/wp/v2/users|rest_route=(?:/|%2F)wp(?:/|%2F)v2(?:/|%2F)users)(?!(?:/|%2F)me\b)(?!.*[?&](?:_locale=user|context=edit))'
     score: 10
     severity: medium
     confidence: medium
