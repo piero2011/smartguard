@@ -5,9 +5,11 @@
 # Uso:  cd smartguard-nueva-version && sudo ./scripts/update.sh [--dry-run] [--yes]
 #       sudo /opt/smartguard/scripts/update.sh --revert      # vuelve a la versión anterior
 #
-# Conserva SIEMPRE: /etc/smartguard/smartguard.env, rules.yaml, sites.yaml, bots.yaml, rules.d/,
+# Conserva SIEMPRE: /etc/smartguard/smartguard.env, sites.yaml, rules.d/, las reglas del panel,
 #   allowlists, /etc/nginx/smartguard/rate-limits.conf, mode.conf, limits-mode.conf,
 #   allowlist.conf, secret.conf, cloudflare-*.conf, y el estado en Redis.
+# rules.yaml y bots.yaml (reglas y bots de fábrica): se actualizan si no los has editado (copia en
+#   *.pre-update); si los editaste se conservan y la versión nueva queda al lado en *.new.
 # Actualiza: /opt/smartguard (con copia en /opt/smartguard.prev), snippets Nginx de "código"
 #   (maps/server/auth/auth-php/static-log/log-format/upstream) tras backup y nginx -t.
 # Muestra las variables NUEVAS de .env.example que no están en tu .env (no las añade solas).
@@ -38,11 +40,43 @@ health() {
   return 1
 }
 
+# Reglas y bots de fábrica. El archivo de /etc se considera sin editar si es igual al de la versión
+# instalada o a alguna versión publicada antes (config/shipped.sha256): entonces se sustituye por el
+# nuevo. Si lo editaste, se conserva.
+SHIPPED_CONFIG="rules.yaml bots.yaml"
+sync_shipped_config() {
+  local f cur new sum
+  for f in $SHIPPED_CONFIG; do
+    cur=$SG_ETC/$f; new=$SRC_DIR/config/$f
+    run rm -f "$cur.pre-update"
+    [ -f "$cur" ] || { run install -o root -g smartguard -m 0640 "$new" "$cur"; continue; }
+    if cmp -s "$cur" "$new"; then run rm -f "$cur.new"; continue; fi
+    sum=$(sha256sum "$cur" | cut -d' ' -f1)
+    if cmp -s "$cur" "$SG_OPT/config/$f" 2>/dev/null || grep -qxF "$sum  $f" "$SRC_DIR/config/shipped.sha256" 2>/dev/null; then
+      run cp -a "$cur" "$cur.pre-update"
+      run install -o root -g smartguard -m 0640 "$new" "$cur"
+      run rm -f "$cur.new"
+      ok "$f actualizado a la versión nueva (no lo habías editado)"
+    else
+      run install -o root -g smartguard -m 0640 "$new" "$cur.new"
+      warn "$cur tiene cambios tuyos: se conserva. La versión nueva queda en $cur.new; para adoptarla: sudo mv $cur.new $cur && sudo smartguard rules reload"
+    fi
+  done
+}
+# Deshace sync_shipped_config (la actualización no llegó a aplicarse, o --revert)
+restore_shipped_config() {
+  local f
+  for f in $SHIPPED_CONFIG; do
+    if [ -f "$SG_ETC/$f.pre-update" ]; then run mv -f "$SG_ETC/$f.pre-update" "$SG_ETC/$f"; fi
+  done
+}
+
 if [ "$REVERT" = true ]; then
   [ -d "$SG_OPT.prev" ] || die "No existe $SG_OPT.prev"
   confirm "¿Volver a la versión anterior de SmartGuard?" || die "Cancelado."
   run mv "$SG_OPT" "$SG_OPT.failed.$(date +%s)"
   run mv "$SG_OPT.prev" "$SG_OPT"
+  restore_shipped_config
   # la versión anterior arranca con su propia unidad systemd, si se guardó
   if [ -f /etc/systemd/system/smartguard.service.prev ]; then
     run mv -f /etc/systemd/system/smartguard.service.prev /etc/systemd/system/smartguard.service
@@ -85,7 +119,10 @@ if [ "$DRY_RUN" != true ]; then
   chown -R root:root "$STAGE"; chmod -R go-w "$STAGE"; chmod 0755 "$STAGE"/scripts/*.sh "$STAGE/bin/smartguard"
 fi
 
-# Validar las reglas del usuario con el código nuevo ANTES de cambiar nada
+# Reglas y bots de fábrica nuevos (solo si no los has editado)
+sync_shipped_config
+
+# Validar las reglas del usuario con el código nuevo ANTES de cambiar nada más
 if [ "$DRY_RUN" != true ]; then
   (cd "$STAGE" && CONFIG_DIR="$SG_ETC" NODE_ENV=test REDIS_ENABLED=false node -e '
     const { ConfigService } = require("./dist/config/config.service");
@@ -93,7 +130,7 @@ if [ "$DRY_RUN" != true ]; then
     const { loadEnv } = require("./dist/config/env");
     (async () => { const c = new ConfigService(loadEnv()); await c.loadFiles(); console.log(JSON.stringify(new RulesService(c).compile())); })()
       .catch(e => { console.error(e.message); process.exit(1); });') \
-    || die "Tus reglas/sitios en $SG_ETC no son válidos con la nueva versión. Nada cambiado."
+    || { restore_shipped_config; die "Tus reglas/sitios en $SG_ETC no son válidos con la nueva versión. Nada cambiado."; }
   ok "Configuración de $SG_ETC validada con la nueva versión"
 fi
 
@@ -112,6 +149,7 @@ if ! nginx_safe_reload; then
   for f in "$NGX_SG"/*.pre-update; do [ -f "$f" ] && mv -f "$f" "${f%.pre-update}"; done
   nginx -t >/dev/null 2>&1 && systemctl reload nginx
   run rm -rf "$STAGE"
+  restore_shipped_config
   die "Nginx rechazó los snippets nuevos. Nada cambiado. Backup: $BACKUP_PATH"
 fi
 run rm -f "$NGX_SG"/*.pre-update
@@ -147,6 +185,7 @@ else
   warn "La nueva versión no responde; revirtiendo…"
   mv "$SG_OPT" "$SG_OPT.failed.$(date +%s)"; mv "$SG_OPT.prev" "$SG_OPT"
   if [ -f "$UNIT.prev" ]; then mv -f "$UNIT.prev" "$UNIT"; systemctl daemon-reload; fi
+  restore_shipped_config
   systemctl restart smartguard
   die "Actualización revertida. Revisa: journalctl -u smartguard -n 80 --no-pager"
 fi

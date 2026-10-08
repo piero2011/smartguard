@@ -678,8 +678,10 @@ stop protecting a site use `smartguard unprotect`; do not delete the lines by ha
 
 `smartguard update` compares the installed commit (`/opt/smartguard/COMMIT`) with the `UPDATE_BRANCH`
 branch of `UPDATE_REPO`. If they match it does nothing; otherwise it downloads to `/opt/smartguard-src`
-and runs `update.sh`, which keeps `.env`, rules, sites and allowlists and goes back by itself if the
-new version does not start.
+and runs `update.sh`, which keeps `.env`, sites, your own rules (`rules.d`, dashboard) and allowlists
+and goes back by itself if the new version does not start. The built-in `rules.yaml` and `bots.yaml`
+are replaced by the new version's as long as you have not edited them (the previous file stays as
+`*.pre-update`); an edited file is kept and the new one is left next to it as `*.new`.
 
 ## 17. Roadmap
 

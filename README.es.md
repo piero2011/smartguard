@@ -665,8 +665,10 @@ Para dejar de proteger un sitio hay que usar `smartguard unprotect`, no borrar l
 
 `smartguard update` compara el commit instalado (`/opt/smartguard/COMMIT`) con la rama `UPDATE_BRANCH`
 de `UPDATE_REPO`. Si coinciden no hace nada; si no, descarga a `/opt/smartguard-src` y ejecuta
-`update.sh`, que conserva `.env`, reglas, sitios y allowlists y vuelve atrás solo si la nueva versión
-no arranca.
+`update.sh`, que conserva `.env`, sitios, tus reglas propias (`rules.d`, panel) y allowlists y vuelve
+atrás solo si la nueva versión no arranca. Los `rules.yaml` y `bots.yaml` de fábrica se sustituyen por
+los de la versión nueva mientras no los hayas editado (el anterior queda como `*.pre-update`); un
+archivo editado se conserva y el nuevo queda al lado como `*.new`.
 
 ## 17. Roadmap
 

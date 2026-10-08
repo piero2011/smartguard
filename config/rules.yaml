@@ -23,7 +23,8 @@
 #   status      [404] … solo analyzer: exige ese estado de respuesta
 #
 # Personalizaciones: NO edites este archivo en el servidor; crea /etc/smartguard/rules.d/*.yaml
-# (update.sh no los toca) o usa overrides por sitio en sites.yaml.
+# (update.sh no los toca) o usa overrides por sitio en sites.yaml. Mientras no lo edites, update.sh
+# lo sustituye por el de cada versión nueva (así llegan las correcciones de reglas).
 # Recarga sin reiniciar:  smartguard rules reload
 # =============================================================================
 
