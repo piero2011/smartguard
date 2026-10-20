@@ -72,6 +72,7 @@ export interface BehaviorConfig {
   loginStuffing: BehaviorSignal;
   rateLimited: BehaviorSignal;
   nginxDenied: BehaviorSignal;
+  requestFlood: BehaviorSignal;
 }
 
 export interface RulesFile {

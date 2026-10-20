@@ -30,7 +30,7 @@
 
 version: 1
 
-# Señales de comportamiento (analizador de logs). Valores iniciales, ajustables.
+# Señales de comportamiento (analizador de logs; requestFlood en la decisión). Valores iniciales, ajustables.
 behavior:
   notFound:      { score: 1,  confidence: low }                                  # cada 404 dinámico
   notFoundBurst: { score: 5,  confidence: medium, windowSec: 60,  threshold: 20 } # muchos 404 distintos
@@ -40,6 +40,7 @@ behavior:
   loginStuffing: { score: 20, confidence: high,   windowSec: 600, threshold: 30 } # 30 logins fallidos (misma IP)
   rateLimited:   { score: 2,  confidence: low }                                  # 429 de limit_req
   nginxDenied:   { score: 3,  confidence: medium }                               # 403/444 cortado por Nginx
+  requestFlood:  { score: 80, confidence: high,   windowSec: 60,  threshold: 120 } # 120 páginas PHP/min misma IP+UA → ban
 
 rules:
   # ---------------------------------------------------------------------------

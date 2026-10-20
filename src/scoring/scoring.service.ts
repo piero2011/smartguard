@@ -14,6 +14,7 @@ import { AllowType, Confidence, DecisionAction, EventCategory, SecurityDecision,
 import { ParsedIp, ipKey } from '../common/ip.util';
 import { redactQuery } from '../common/uri.util';
 import { logger } from '../common/logger';
+import { WindowCounter, reached } from '../common/window-counter';
 import { BuiltContext, fingerprint } from './request-context';
 import { RuleTarget } from '../rules/rule.types';
 
@@ -39,11 +40,16 @@ export interface EvalMeta {
 
 const SEV_RANK: Record<Severity, number> = { low: 0, medium: 1, high: 2, critical: 3 };
 
+/** Peticiones de fondo que no cuentan para la ráfaga (admin-ajax, wp-cron, REST de WordPress/WooCommerce). */
+const BACKGROUND_PATH_RE = /(?:^|\/)(?:wp-admin\/admin-ajax\.php|wp-cron\.php)$|(?:^|\/)wp-json(?:\/|$)/i;
+const BACKGROUND_QUERY_RE = /(?:^|&)(?:wc-ajax|rest_route)=/i;
+
 /**
  * Motor de scoring y decisión (puntos 9, 10, 11, 76, 82, 83).
  *
  * Reglas clave anti-falsos-positivos:
- *  1. El VOLUMEN por sí solo nunca suma puntos aquí (eso lo hace Nginx con límites altos por endpoint).
+ *  1. El VOLUMEN por sí solo solo suma puntos en una ráfaga muy por encima de lo humano
+ *     (behavior.requestFlood: páginas PHP por IP + User-Agent); el resto lo limita Nginx por endpoint.
  *  2. Confianza de la señal → alcance: low = solo huella IP+UA; medium = IP + huella;
  *     high = IP + huella + "evidencia fuerte".
  *  3. Banear la IP COMPLETA exige score ≥ SCORE_BLOCK **y** evidencia fuerte ≥ STRONG_EVIDENCE_MIN.
@@ -55,6 +61,9 @@ const SEV_RANK: Record<Severity, number> = { low: 0, medium: 1, high: 2, critica
  */
 @Injectable()
 export class ScoringService implements OnModuleInit {
+  /** peticiones por huella para la ráfaga (en memoria: sin consultas extra a Redis) */
+  private floodCounter = new WindowCounter();
+
   constructor(
     private readonly config: ConfigService,
     private readonly rules: RulesService,
@@ -112,6 +121,17 @@ export class ScoringService implements OnModuleInit {
     } else if (ctx.userAgent) {
       const bad = this.rules.matchBadBot(ctx.userAgent);
       if (bad) signals.push({ id: `bad-bot:${bad.id}`, score: bad.score, confidence: bad.confidence, category: bad.category, severity: 'medium', hit: false });
+    }
+
+    // Ráfaga: demasiadas páginas PHP del mismo visitante (IP + User-Agent) en poco tiempo. Por huella
+    // y no por IP, para que una oficina con NAT (muchos navegadores, una IP) no cuente como uno solo.
+    // Las llamadas AJAX/REST de fondo no cuentan: un navegador normal las hace en ráfaga.
+    const flood = this.config.rules.behavior.requestFlood;
+    if (flood.score > 0 && !ev.allowedBy && !BACKGROUND_PATH_RE.test(ctx.path) && !BACKGROUND_QUERY_RE.test(ctx.query)) {
+      const n = this.floodCounter.hit(built.fpKey, (flood.windowSec ?? 60) * 1000, Date.now());
+      if (reached(n, flood.threshold)) {
+        signals.push({ id: 'request_flood', score: flood.score, confidence: flood.confidence, category: 'RATE_SPIKE', severity: 'high', hit: false });
+      }
     }
 
     const blockNow = ev.blockNow ? (ev.matches.find((m) => m.action === 'block')?.id ?? 'rule') : null;

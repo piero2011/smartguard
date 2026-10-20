@@ -404,9 +404,17 @@ Recommended: its own DB (`REDIS_DB`) or a dedicated instance with `maxmemory 128
 | ≥ 80 **and** strong evidence ≥ 40 | BLOCK + IP ban (15m → 1h → 6h → 24h → 7d) |
 | ≥ 80 on the fingerprint only | BLOCK of IP+UA for 10 min (the rest of the NAT is unaffected) |
 
-NAT protection: volume **never** adds points in SmartGuard; low-confidence signals only affect the
-IP+User-Agent fingerprint; medium-confidence ones can limit but **never** ban a whole IP; the fast
-scanning bonus only counts medium/high-confidence hits.
+NAT protection: volume adds points in SmartGuard **only** in a flood far above human browsing (see
+below); low-confidence signals only affect the IP+User-Agent fingerprint; medium-confidence ones can
+limit but **never** ban a whole IP; the fast scanning bonus only counts medium/high-confidence hits.
+
+**Request flood** (`behavior.requestFlood` in `rules.yaml`): 120 PHP pages in one minute from the same
+IP + User-Agent bans the IP (+80, high confidence), even with no attack in the URLs, e.g. a
+blocklisted bot hammering the home page. It counts per IP + User-Agent so an office behind NAT (many
+browsers, one IP) does not add up as one visitor. Background calls a normal browser makes in bursts
+do not count: `admin-ajax.php`, `wp-cron.php`, `/wp-json/`, `?wc-ajax=` and `?rest_route=`. The
+allowlist and verified search engines are never banned. Tune `threshold`/`windowSec`, or set
+`score: 0` to turn it off.
 
 Every decision is explainable: `smartguard ip <IP>` or `GET /admin/ip/<IP>` shows reasons, decay and
 action (example in docs/02, 14.1).

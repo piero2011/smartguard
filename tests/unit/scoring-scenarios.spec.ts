@@ -44,6 +44,29 @@ describe('Escenarios de decisión (punto 52)', () => {
     }
   });
 
+  it('ráfaga: 120 páginas PHP en un minuto desde la misma IP + UA → ban de la IP', async () => {
+    const h = await makeHarness({ AUDIT_MODE: 'false' });
+    const actions: string[] = [];
+    for (let i = 0; i < 120; i++) actions.push((await h.scoring.decide(h.req({ ip: '45.138.12.45', uri: '/' }))).action);
+    expect(actions.slice(0, 119)).not.toContain('BLOCK');
+    expect(actions[119]).toBe('BLOCK');
+    const ban = await h.bans.getBan('ip', '45.138.12.45');
+    expect(ban).not.toBeNull();
+    expect(ban!.reasons.join(',')).toContain('request_flood+80');
+    // con otro User-Agent la IP sigue baneada: el ban es de la IP entera
+    expect((await h.scoring.decide(h.req({ ip: '45.138.12.45', uri: '/shop/', userAgent: 'curl/8.0' }))).action).toBe('BLOCK');
+  });
+
+  it('ráfaga: AJAX/REST de fondo y la allowlist no cuentan', async () => {
+    const h = await makeHarness({ AUDIT_MODE: 'false' });
+    for (let i = 0; i < 300; i++) {
+      const uri = ['/wp-admin/admin-ajax.php', '/?wc-ajax=get_refreshed_fragments', '/wp-json/wc/store/v1/cart', '/wp-cron.php'][i % 4]!;
+      expect((await h.scoring.decide(h.req({ ip: '203.0.113.14', uri, method: 'POST' }))).action).toBe('ALLOW');
+    }
+    await h.allowlist.add('203.0.113.15', 'ADMIN_ALLOWLIST', 'client', 'admin');
+    for (let i = 0; i < 300; i++) expect((await h.scoring.decide(h.req({ ip: '203.0.113.15', uri: '/' }))).action).toBe('ALLOW');
+  });
+
   it('WordPress Multisite: /site1/wp-admin/ y /site2/wp-admin/ funcionan', async () => {
     const h = await makeHarness();
     for (const uri of ['/site1/wp-admin/', '/site2/wp-admin/', '/site1/wp-login.php', '/site2/wp-admin/post-new.php', '/site1/wp-json/wp/v2/posts']) {

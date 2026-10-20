@@ -26,6 +26,7 @@ export const DEFAULT_BEHAVIOR: BehaviorConfig = {
   loginStuffing: { score: 20, confidence: 'high', windowSec: 600, threshold: 30 },
   rateLimited: { score: 2, confidence: 'low' },
   nginxDenied: { score: 3, confidence: 'medium' },
+  requestFlood: { score: 80, confidence: 'high', windowSec: 60, threshold: 120 },
 };
 
 /**

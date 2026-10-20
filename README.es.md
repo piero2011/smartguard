@@ -401,9 +401,18 @@ Recomendado: una DB propia (`REDIS_DB`) o una instancia dedicada con `maxmemory 
 | ≥ 80 **y** evidencia fuerte ≥ 40 | BLOCK + ban de IP (15m → 1h → 6h → 24h → 7d) |
 | ≥ 80 solo en la huella | BLOCK de IP+UA 10 min (el resto del NAT no se ve afectado) |
 
-Protección NAT (punto 11): el volumen **nunca** suma puntos en SmartGuard; las señales de baja
-confianza solo afectan a la huella IP+User-Agent; las de confianza media pueden limitar pero
-**nunca** banear una IP entera; el bonus de escaneo rápido solo cuenta hits de confianza media/alta.
+Protección NAT (punto 11): el volumen **solo** suma puntos en SmartGuard en una ráfaga muy por
+encima de lo humano (ver abajo); las señales de baja confianza solo afectan a la huella
+IP+User-Agent; las de confianza media pueden limitar pero **nunca** banear una IP entera; el bonus
+de escaneo rápido solo cuenta hits de confianza media/alta.
+
+**Ráfaga de peticiones** (`behavior.requestFlood` en `rules.yaml`): 120 páginas PHP en un minuto
+desde la misma IP + User-Agent banean la IP (+80, confianza alta), aunque las URLs no tengan ningún
+ataque; p. ej. un bot de una lista negra martilleando la portada. Cuenta por IP + User-Agent para
+que una oficina con NAT (muchos navegadores, una IP) no sume como un solo visitante. No cuentan las
+llamadas de fondo que un navegador normal hace en ráfaga: `admin-ajax.php`, `wp-cron.php`,
+`/wp-json/`, `?wc-ajax=` y `?rest_route=`. La allowlist y los buscadores verificados nunca se
+banean. Ajusta `threshold`/`windowSec`, o pon `score: 0` para desactivarla.
 
 Cada decisión es explicable: `smartguard ip <IP>` o `GET /admin/ip/<IP>` muestra motivos, decay y
 acción (ejemplo en docs/02, 14.1).
