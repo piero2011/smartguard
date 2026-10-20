@@ -81,6 +81,7 @@ export interface Harness {
   resolver: FakeResolver;
   bans: BanService;
   blocklist: BlocklistService;
+  ipinfo: IpInfoService;
   scoring: ScoringService;
   analyzer: LogAnalyzerService;
   req(r: Partial<RawRequest> & { ip: string }): BuiltContext;
@@ -113,7 +114,7 @@ export async function makeHarness(vars: Record<string, string> = {}): Promise<Ha
   ipinfo.setResolver({ resolveTxt: async () => Promise.reject(new Error('sin DNS en tests')) });
   const blocklist = new BlocklistService(reputation, bans, ipinfo);
   blocklist.setPrefixFetcher(async () => Promise.reject(new Error('sin red en tests')));
-  const scoring = new ScoringService(config, rules, reputation, bans, allowlist, bots, mode, metrics, stats, blocklist);
+  const scoring = new ScoringService(config, rules, reputation, bans, allowlist, bots, mode, metrics, stats, blocklist, ipinfo);
   scoring.onModuleInit();
   const analyzer = new LogAnalyzerService(config, rules, scoring, cfRanges, metrics, stats);
 
@@ -134,7 +135,7 @@ export async function makeHarness(vars: Record<string, string> = {}): Promise<Ha
     return b;
   };
 
-  return { config, rules, redis, reputation, metrics, stats, mode, cfRanges, allowlist, bots, resolver, bans, blocklist, scoring, analyzer, req };
+  return { config, rules, redis, reputation, metrics, stats, mode, cfRanges, allowlist, bots, resolver, bans, blocklist, ipinfo, scoring, analyzer, req };
 }
 
 export const NORMAL_PATHS = [

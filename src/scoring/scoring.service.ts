@@ -10,6 +10,7 @@ import { ModeService } from './mode.service';
 import { MetricsService } from '../metrics/metrics.service';
 import { StatsService } from '../stats/stats.service';
 import { BlocklistService } from '../blocklist/blocklist.service';
+import { IpInfoService } from '../ipinfo/ipinfo.service';
 import { AllowType, Confidence, DecisionAction, EventCategory, SecurityDecision, SecurityEvent, Severity } from '../common/types';
 import { ParsedIp, ipKey } from '../common/ip.util';
 import { redactQuery } from '../common/uri.util';
@@ -40,16 +41,22 @@ export interface EvalMeta {
 
 const SEV_RANK: Record<Severity, number> = { low: 0, medium: 1, high: 2, critical: 3 };
 
-/** Peticiones de fondo que no cuentan para la ráfaga (admin-ajax, wp-cron, REST de WordPress/WooCommerce). */
-const BACKGROUND_PATH_RE = /(?:^|\/)(?:wp-admin\/admin-ajax\.php|wp-cron\.php)$|(?:^|\/)wp-json(?:\/|$)/i;
-const BACKGROUND_QUERY_RE = /(?:^|&)(?:wc-ajax|rest_route)=/i;
+/**
+ * Peticiones de fondo que no cuentan para la ráfaga: admin-ajax, wp-cron, REST de WordPress/WooCommerce
+ * y los avisos de las pasarelas de pago (wc-api), que llegan justamente desde centros de datos.
+ */
+const BACKGROUND_PATH_RE = /(?:^|\/)(?:wp-admin\/admin-ajax\.php|wp-cron\.php)$|(?:^|\/)(?:wp-json|wc-api)(?:\/|$)/i;
+const BACKGROUND_QUERY_RE = /(?:^|&)(?:wc-ajax|rest_route|wc-api)=/i;
+/** Peticiones (en la ventana) a partir de las que se consulta en segundo plano de quién es la red de la IP */
+const HOSTING_LOOKUP_AT = 10;
 
 /**
  * Motor de scoring y decisión (puntos 9, 10, 11, 76, 82, 83).
  *
  * Reglas clave anti-falsos-positivos:
  *  1. El VOLUMEN por sí solo solo suma puntos en una ráfaga muy por encima de lo humano
- *     (behavior.requestFlood: páginas PHP por IP + User-Agent); el resto lo limita Nginx por endpoint.
+ *     (requestFlood por IP + User-Agent; hostingFlood, más bajo, por IP de centro de datos);
+ *     el resto lo limita Nginx por endpoint.
  *  2. Confianza de la señal → alcance: low = solo huella IP+UA; medium = IP + huella;
  *     high = IP + huella + "evidencia fuerte".
  *  3. Banear la IP COMPLETA exige score ≥ SCORE_BLOCK **y** evidencia fuerte ≥ STRONG_EVIDENCE_MIN.
@@ -75,6 +82,7 @@ export class ScoringService implements OnModuleInit {
     private readonly metrics: MetricsService,
     private readonly stats: StatsService,
     private readonly blocklist: BlocklistService,
+    private readonly ipinfo: IpInfoService,
   ) {}
 
   onModuleInit(): void {
@@ -123,19 +131,42 @@ export class ScoringService implements OnModuleInit {
       if (bad) signals.push({ id: `bad-bot:${bad.id}`, score: bad.score, confidence: bad.confidence, category: bad.category, severity: 'medium', hit: false });
     }
 
-    // Ráfaga: demasiadas páginas PHP del mismo visitante (IP + User-Agent) en poco tiempo. Por huella
-    // y no por IP, para que una oficina con NAT (muchos navegadores, una IP) no cuente como uno solo.
-    // Las llamadas AJAX/REST de fondo no cuentan: un navegador normal las hace en ráfaga.
-    const flood = this.config.rules.behavior.requestFlood;
-    if (flood.score > 0 && !ev.allowedBy && !BACKGROUND_PATH_RE.test(ctx.path) && !BACKGROUND_QUERY_RE.test(ctx.query)) {
-      const n = this.floodCounter.hit(built.fpKey, (flood.windowSec ?? 60) * 1000, Date.now());
-      if (reached(n, flood.threshold)) {
-        signals.push({ id: 'request_flood', score: flood.score, confidence: flood.confidence, category: 'RATE_SPIKE', severity: 'high', hit: false });
-      }
-    }
+    // Un buscador que dice serlo (verificación DNS pendiente o correcta) no cuenta como ráfaga
+    this.floodSignals(built, ev.allowedBy !== null || (vb !== null && !signals.some((s) => s.id.startsWith('fake-bot:'))), signals);
 
     const blockNow = ev.blockNow ? (ev.matches.find((m) => m.action === 'block')?.id ?? 'rule') : null;
     return this.evaluate(built, signals, { source: 'decision', blockNow }, verifiedBot);
+  }
+
+  /**
+   * Ráfagas: demasiadas páginas PHP en poco tiempo, aunque las URLs no tengan ningún ataque.
+   *  - requestFlood: por huella (IP + User-Agent), para que una oficina con NAT (muchos navegadores,
+   *    una IP) no cuente como un solo visitante.
+   *  - hostingFlood: por IP y con umbral más bajo si la IP es de un centro de datos (servidores, no
+   *    personas: ahí no hay NAT de oficina que proteger, y un bot que cambia de User-Agent no se reparte).
+   *    El dueño de la red se consulta en segundo plano al llegar a lookupAt peticiones; la decisión
+   *    solo lee la caché.
+   * Las llamadas AJAX/REST de fondo y los callbacks de pago no cuentan: se hacen en ráfaga legítimamente.
+   */
+  private floodSignals(built: BuiltContext, exempt: boolean, signals: Signal[]): void {
+    const { ctx, ip } = built;
+    if (exempt || BACKGROUND_PATH_RE.test(ctx.path) || BACKGROUND_QUERY_RE.test(ctx.query)) return;
+    const { requestFlood: flood, hostingFlood: hosting } = this.config.rules.behavior;
+    const now = Date.now();
+    if (flood.score > 0 && reached(this.floodCounter.hit(`fp|${built.fpKey}`, (flood.windowSec ?? 60) * 1000, now), flood.threshold)) {
+      signals.push({ id: 'request_flood', score: flood.score, confidence: flood.confidence, category: 'RATE_SPIKE', severity: 'high', hit: false });
+    }
+    if (hosting.score <= 0) return;
+    const n = this.floodCounter.hit(`ip|${ctx.ipKey}`, (hosting.windowSec ?? 60) * 1000, now);
+    const info = this.ipinfo.peek(ip);
+    if (info === undefined) {
+      if (n === HOSTING_LOOKUP_AT) void this.ipinfo.lookup(ip.address);
+      return;
+    }
+    if (info?.hosting && !info.cloudflare && reached(n, hosting.threshold)) {
+      const net = info.asn ? `:AS${info.asn}` : '';
+      signals.push({ id: `hosting_flood${net}`, score: hosting.score, confidence: hosting.confidence, category: 'RATE_SPIKE', severity: 'high', hit: false });
+    }
   }
 
   /**

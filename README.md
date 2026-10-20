@@ -412,9 +412,17 @@ limit but **never** ban a whole IP; the fast scanning bonus only counts medium/h
 IP + User-Agent bans the IP (+80, high confidence), even with no attack in the URLs, e.g. a
 blocklisted bot hammering the home page. It counts per IP + User-Agent so an office behind NAT (many
 browsers, one IP) does not add up as one visitor. Background calls a normal browser makes in bursts
-do not count: `admin-ajax.php`, `wp-cron.php`, `/wp-json/`, `?wc-ajax=` and `?rest_route=`. The
+do not count: `admin-ajax.php`, `wp-cron.php`, `/wp-json/`, `?wc-ajax=`, `?rest_route=` and `wc-api` (payment callbacks). The
 allowlist and verified search engines are never banned. Tune `threshold`/`windowSec`, or set
 `score: 0` to turn it off.
+
+**Flood from a data center** (`behavior.hostingFlood`): if the IP belongs to a hosting / cloud network
+(servers, not people), 30 PHP pages in one minute ban it, counted **per IP** whatever the User-Agent:
+there is no office NAT to protect there, and a bot that rotates User-Agents does not spread out. The
+network owner is looked up in the background (Team Cymru DNS, cached 24 h) once an IP reaches 10
+pages; the decision never waits for it. Payment gateway callbacks (`wc-api`), the background calls
+above and anything claiming to be a search engine do not count. The ban reason names the network,
+e.g. `hosting_flood:AS218785`.
 
 Every decision is explainable: `smartguard ip <IP>` or `GET /admin/ip/<IP>` shows reasons, decay and
 action (example in docs/02, 14.1).

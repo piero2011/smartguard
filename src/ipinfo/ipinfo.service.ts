@@ -30,8 +30,9 @@ const HOSTING_RE =
 const DAY = 86_400_000;
 
 /**
- * Datos de red de una IP para el panel (nunca en el camino de la decisión): solo se consulta cuando
- * el administrador abre una tabla, con caché de 24 h.
+ * Datos de red de una IP, con caché de 24 h. Se consulta cuando el administrador abre una tabla y,
+ * en segundo plano, cuando una IP empieza a mandar muchas páginas (ráfaga desde centro de datos);
+ * la decisión solo lee la caché (peek), nunca espera al DNS.
  *
  * Fuente: servicio IP→ASN de Team Cymru por DNS (TXT), sin API key ni cuota:
  *   IPv4  d.c.b.a.origin.asn.cymru.com      → "14061 | 167.99.144.0/20 | US | arin | 2018-04-05"
@@ -67,6 +68,11 @@ export class IpInfoService {
     };
     await Promise.all(Array.from({ length: Math.min(this.config.env.dnsConcurrency * 2, queue.length) }, worker));
     return out;
+  }
+
+  /** Lo ya sabido de una IP, sin consultar nada (undefined = aún sin consultar). Síncrono, sin I/O. */
+  peek(ip: ParsedIp): IpInfo | null | undefined {
+    return this.cache.get(ip.address);
   }
 
   async lookup(raw: string): Promise<IpInfo | null> {

@@ -27,6 +27,7 @@ export const DEFAULT_BEHAVIOR: BehaviorConfig = {
   rateLimited: { score: 2, confidence: 'low' },
   nginxDenied: { score: 3, confidence: 'medium' },
   requestFlood: { score: 80, confidence: 'high', windowSec: 60, threshold: 120 },
+  hostingFlood: { score: 80, confidence: 'high', windowSec: 60, threshold: 30 },
 };
 
 /**

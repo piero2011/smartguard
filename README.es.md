@@ -411,8 +411,16 @@ desde la misma IP + User-Agent banean la IP (+80, confianza alta), aunque las UR
 ataque; p. ej. un bot de una lista negra martilleando la portada. Cuenta por IP + User-Agent para
 que una oficina con NAT (muchos navegadores, una IP) no sume como un solo visitante. No cuentan las
 llamadas de fondo que un navegador normal hace en ráfaga: `admin-ajax.php`, `wp-cron.php`,
-`/wp-json/`, `?wc-ajax=` y `?rest_route=`. La allowlist y los buscadores verificados nunca se
+`/wp-json/`, `?wc-ajax=`, `?rest_route=` y `wc-api` (avisos de pago). La allowlist y los buscadores verificados nunca se
 banean. Ajusta `threshold`/`windowSec`, o pon `score: 0` para desactivarla.
+
+**Ráfaga desde centro de datos** (`behavior.hostingFlood`): si la IP es de una red de hosting / nube
+(servidores, no personas), 30 páginas PHP en un minuto la banean, contadas **por IP** sea cual sea
+el User-Agent: ahí no hay NAT de oficina que proteger, y un bot que cambia de User-Agent no se
+reparte. El dueño de la red se consulta en segundo plano (DNS de Team Cymru, caché de 24 h) cuando
+una IP llega a 10 páginas; la decisión nunca lo espera. No cuentan los avisos de pasarelas de pago
+(`wc-api`), las llamadas de fondo de arriba ni lo que dice ser un buscador. El motivo del ban
+nombra la red, p. ej. `hosting_flood:AS218785`.
 
 Cada decisión es explicable: `smartguard ip <IP>` o `GET /admin/ip/<IP>` muestra motivos, decay y
 acción (ejemplo en docs/02, 14.1).

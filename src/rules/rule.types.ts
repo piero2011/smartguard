@@ -73,6 +73,7 @@ export interface BehaviorConfig {
   rateLimited: BehaviorSignal;
   nginxDenied: BehaviorSignal;
   requestFlood: BehaviorSignal;
+  hostingFlood: BehaviorSignal;
 }
 
 export interface RulesFile {

@@ -67,6 +67,50 @@ describe('Escenarios de decisión (punto 52)', () => {
     for (let i = 0; i < 300; i++) expect((await h.scoring.decide(h.req({ ip: '203.0.113.15', uri: '/' }))).action).toBe('ALLOW');
   });
 
+  /** DNS de Team Cymru simulado: 45.138.12.x es un centro de datos, 203.0.113.x un proveedor de internet de casa. */
+  const cymru = {
+    resolveTxt: async (name: string): Promise<string[][]> => {
+      if (name.endsWith('.12.138.45.origin.asn.cymru.com')) return [['218785 | 45.138.12.0/24 | LT | ripencc | 2019-08-07']];
+      if (name.endsWith('.113.0.203.origin.asn.cymru.com')) return [['6147 | 203.0.113.0/24 | PE | lacnic | 2001-01-01']];
+      if (name.endsWith('.66.249.66.origin.asn.cymru.com')) return [['15169 | 66.249.64.0/19 | US | arin | 2000-03-30']];
+      if (name === 'AS218785.asn.cymru.com') return [['218785 | HK | ripencc | 2026-09-02 | TC-DATACENTER - TC DATACENTER LIMITED, HK']];
+      if (name === 'AS6147.asn.cymru.com') return [['6147 | PE | lacnic | 1996-01-01 | Telefonica del Peru S.A.A., PE']];
+      if (name === 'AS15169.asn.cymru.com') return [['15169 | US | arin | 2000-03-30 | GOOGLE - Google LLC, US']];
+      throw new Error('NXDOMAIN');
+    },
+  };
+
+  it('ráfaga desde centro de datos: 30 páginas en un minuto → ban, aunque cambie de User-Agent', async () => {
+    const h = await makeHarness({ AUDIT_MODE: 'false' });
+    h.ipinfo.setResolver(cymru);
+    const actions: string[] = [];
+    for (let i = 0; i < 30; i++) {
+      actions.push((await h.scoring.decide(h.req({ ip: '45.138.12.45', uri: `/?p=${i}`, userAgent: `Mozilla/5.0 Chrome/12${i}.0` }))).action);
+      if (i === 9) await h.ipinfo.lookup('45.138.12.45'); // la consulta en segundo plano termina
+    }
+    expect(actions.slice(0, 29)).not.toContain('BLOCK');
+    expect(actions[29]).toBe('BLOCK');
+    expect((await h.bans.getBan('ip', '45.138.12.45'))!.reasons.join(',')).toContain('hosting_flood:AS218785+80');
+  });
+
+  it('ráfaga desde proveedor de internet de casa: el umbral de centro de datos no aplica', async () => {
+    const h = await makeHarness({ AUDIT_MODE: 'false' });
+    h.ipinfo.setResolver(cymru);
+    await h.ipinfo.lookup('203.0.113.40');
+    for (let i = 0; i < 100; i++) {
+      expect((await h.scoring.decide(h.req({ ip: '203.0.113.40', uri: `/?p=${i}`, userAgent: `Mozilla/5.0 Chrome/12${i % 20}.0` }))).action).toBe('ALLOW');
+    }
+  });
+
+  it('ráfaga desde centro de datos: un buscador (Googlebot en la red de Google) no cuenta', async () => {
+    const h = await makeHarness({ AUDIT_MODE: 'false' });
+    h.ipinfo.setResolver(cymru);
+    await h.ipinfo.lookup('66.249.66.1');
+    const ua = 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)';
+    for (let i = 0; i < 60; i++) await h.scoring.decide(h.req({ ip: '66.249.66.1', uri: `/product/p-${i}/`, userAgent: ua }));
+    expect(await h.bans.getBan('ip', '66.249.66.1')).toBeNull();
+  });
+
   it('WordPress Multisite: /site1/wp-admin/ y /site2/wp-admin/ funcionan', async () => {
     const h = await makeHarness();
     for (const uri of ['/site1/wp-admin/', '/site2/wp-admin/', '/site1/wp-login.php', '/site2/wp-admin/post-new.php', '/site1/wp-json/wp/v2/posts']) {
