@@ -124,7 +124,7 @@ export class ScoringService implements OnModuleInit {
       const st = this.bots.status(ip, vb);
       if (st.state === 'verified') verifiedBot = st.bot;
       else if (st.state === 'fake') {
-        signals.push({ id: `fake-bot:${vb.id}`, score: this.config.env.fakeBotScore, confidence: 'medium', category: 'BAD_BOT', severity: 'medium', hit: false });
+        signals.push(this.fakeBotSignal(ip, vb));
       }
     } else if (ctx.userAgent) {
       const bad = this.rules.matchBadBot(ctx.userAgent);
@@ -136,6 +136,21 @@ export class ScoringService implements OnModuleInit {
 
     const blockNow = ev.blockNow ? (ev.matches.find((m) => m.action === 'block')?.id ?? 'rule') : null;
     return this.evaluate(built, signals, { source: 'decision', blockNow }, verifiedBot);
+  }
+
+  /**
+   * Buscador falso (el User-Agent dice Googlebot/Bingbot… y el DNS no lo confirma). Desde una IP de
+   * casa puede ser una extensión del navegador detrás de un NAT: confianza media, nunca banea la IP.
+   * Desde un centro de datos es un bot haciéndose pasar por Google: confianza alta, banea la IP.
+   */
+  private fakeBotSignal(ip: ParsedIp, bot: CompiledBot): Signal {
+    const info = this.ipinfo.peek(ip);
+    if (info === undefined) void this.ipinfo.lookup(ip.address);
+    const score = this.config.env.fakeBotScore;
+    if (info?.hosting && !info.cloudflare) {
+      return { id: `fake-bot:${bot.id}:datacenter`, score, confidence: 'high', category: 'BAD_BOT', severity: 'high', hit: false };
+    }
+    return { id: `fake-bot:${bot.id}`, score, confidence: 'medium', category: 'BAD_BOT', severity: 'medium', hit: false };
   }
 
   /**
@@ -459,7 +474,7 @@ export class ScoringService implements OnModuleInit {
       if (!(await this.reputation.call((s) => s.once(`fakebot:${bot.id}:${ip.address}`, this.config.env.dnsNegativeTtlSec)))) return;
       await this.evaluate(
         built,
-        [{ id: `fake-bot:${bot.id}`, score: this.config.env.fakeBotScore, confidence: 'medium', category: 'BAD_BOT', severity: 'medium', hit: false }],
+        [this.fakeBotSignal(ip, bot)],
         { source: 'bot-verifier' },
       );
     } catch (e) {

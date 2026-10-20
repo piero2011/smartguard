@@ -106,6 +106,8 @@ describe('Escenarios de decisión (punto 52)', () => {
     const h = await makeHarness({ AUDIT_MODE: 'false' });
     h.ipinfo.setResolver(cymru);
     await h.ipinfo.lookup('66.249.66.1');
+    h.resolver.ptr.set('66.249.66.1', ['crawl-66-249-66-1.googlebot.com.']);
+    h.resolver.a.set('crawl-66-249-66-1.googlebot.com', ['66.249.66.1']);
     const ua = 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)';
     for (let i = 0; i < 60; i++) await h.scoring.decide(h.req({ ip: '66.249.66.1', uri: `/product/p-${i}/`, userAgent: ua }));
     expect(await h.bans.getBan('ip', '66.249.66.1')).toBeNull();
@@ -200,6 +202,34 @@ describe('Escenarios de decisión (punto 52)', () => {
     const d2 = await h.scoring.decide(b);
     expect(d2.basis).not.toMatch(/verified-bot/);
     expect(d2.reasons.join(',')).toContain('fake-bot:google');
+  });
+
+  it('Googlebot FALSO desde centro de datos mezclado con navegadores: banea la IP entera', async () => {
+    const h = await makeHarness({ AUDIT_MODE: 'false' });
+    h.ipinfo.setResolver(cymru);
+    await h.ipinfo.lookup('45.138.12.45');
+    h.resolver.ptr.set('45.138.12.45', ['evil.example.net']);
+    const google = 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)';
+    await h.scoring.decide(h.req({ ip: '45.138.12.45', uri: '/arkbluecross/', userAgent: google }));
+    await h.bots.drain();
+    for (let i = 0; i < 8; i++) await h.scoring.decide(h.req({ ip: '45.138.12.45', uri: '/arkbluecross/', userAgent: google }));
+    const ban = await h.bans.getBan('ip', '45.138.12.45');
+    expect(ban).not.toBeNull();
+    expect(ban!.reasons.join(',')).toContain('fake-bot:google:datacenter');
+    const firefox = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:134.0) Gecko/20100101 Firefox/134.0';
+    expect((await h.scoring.decide(h.req({ ip: '45.138.12.45', uri: '/arkbluecross/', userAgent: firefox }))).action).toBe('BLOCK');
+  });
+
+  it('Googlebot FALSO desde IP de casa: sigue sin banear la IP entera (NAT)', async () => {
+    const h = await makeHarness({ AUDIT_MODE: 'false' });
+    h.ipinfo.setResolver(cymru);
+    await h.ipinfo.lookup('203.0.113.41');
+    h.resolver.ptr.set('203.0.113.41', ['evil.example.net']);
+    const google = 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)';
+    await h.scoring.decide(h.req({ ip: '203.0.113.41', uri: '/', userAgent: google }));
+    await h.bots.drain();
+    for (let i = 0; i < 8; i++) await h.scoring.decide(h.req({ ip: '203.0.113.41', uri: '/', userAgent: google }));
+    expect(await h.bans.getBan('ip', '203.0.113.41')).toBeNull();
   });
 
   it('Googlebot FALSO con PTR falsificado (hostname googlebot.com que no resuelve a la IP)', async () => {

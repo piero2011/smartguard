@@ -422,6 +422,12 @@ una IP llega a 10 páginas; la decisión nunca lo espera. No cuentan los avisos 
 (`wc-api`), las llamadas de fondo de arriba ni lo que dice ser un buscador. El motivo del ban
 nombra la red, p. ej. `hosting_flood:AS218785`.
 
+**Buscador falso desde centro de datos**: un User-Agent que dice ser Googlebot/Bingbot/Applebot y
+no pasa la verificación DNS cuenta como evidencia fuerte si la IP es de una red de hosting
+(`fake-bot:google:datacenter`): unas pocas peticiones banean la IP entera, también las que manda
+con User-Agents de navegador normal. Desde una IP de casa o móvil sigue siendo de confianza media
+(solo puede bloquear esa IP + User-Agent), como antes.
+
 Cada decisión es explicable: `smartguard ip <IP>` o `GET /admin/ip/<IP>` muestra motivos, decay y
 acción (ejemplo en docs/02, 14.1).
 

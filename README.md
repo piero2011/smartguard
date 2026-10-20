@@ -424,6 +424,12 @@ pages; the decision never waits for it. Payment gateway callbacks (`wc-api`), th
 above and anything claiming to be a search engine do not count. The ban reason names the network,
 e.g. `hosting_flood:AS218785`.
 
+**Fake search engine from a data center**: a User-Agent claiming Googlebot/Bingbot/Applebot whose
+DNS check fails counts as strong evidence when the IP is from a hosting network
+(`fake-bot:google:datacenter`), so a few such requests ban the whole IP, including the requests it
+sends with ordinary browser User-Agents. From a home/mobile IP it stays medium confidence (it can
+only block that IP + User-Agent), as before.
+
 Every decision is explainable: `smartguard ip <IP>` or `GET /admin/ip/<IP>` shows reasons, decay and
 action (example in docs/02, 14.1).
 
